@@ -375,6 +375,7 @@ CREATE TABLE stories (
     content TEXT NOT NULL,
     prompt_template_id UUID,                  -- referência ao template usado
     prompt_used TEXT NOT NULL,                -- snapshot para auditoria
+    user_guidance TEXT DEFAULT NULL,          -- snapshot do direcionamento do responsável (PII; purgado na anonimização §11.2)
     character_names TEXT[] NOT NULL DEFAULT '{}',  -- snapshot p/ anonimização (Seção 11)
     moderation_status VARCHAR(20) NOT NULL DEFAULT 'PENDING'
         CHECK (moderation_status IN ('PENDING','APPROVED','REJECTED')),
