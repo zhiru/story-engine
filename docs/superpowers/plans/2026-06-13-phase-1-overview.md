@@ -1,28 +1,29 @@
 # StoryGen Engine — Fase 1 (MVP modo SINGLE): Visão de Implementação
 
-> **For agentic workers:** Este é o **plano-mãe** da Fase 1. Ele NÃO é executável diretamente — decompõe a Fase 1 em work packages (WP). Cada WP tem (ou terá) seu próprio plano executável em `docs/superpowers/plans/`. Implemente um WP por vez com `superpowers:subagent-driven-development` ou `superpowers:executing-plans`.
+> **For agentic workers:** Plano-mãe da Fase 1. NÃO é executável diretamente — decompõe em work packages (WP). Cada WP tem (ou terá) seu plano executável em `docs/superpowers/plans/`. Implemente um WP por vez com `superpowers:subagent-driven-development` ou `superpowers:executing-plans`.
 >
-> **v2 (2026-06-13):** revisado por painel adversarial (5 lentes). Correções principais: quota 100% dentro do WP4; gate de assinatura/consentimento testado via fixture seedado; modo SINGLE aplicado por valor visível ao banco (não pelo `APP_MODE` de build); WP7 dividido em WP7a/WP7b; NFRs Fase-1 com dono explícito; tabela `health` de smoke removida em migration própria no WP1.
+> **v3 (2026-06-13) — PIVÔ SEM SUPABASE.** Stack agora: **PostgreSQL puro (Docker em dev/test) + API Fastify própria (`apps/api`) + Drizzle ORM + auth própria (argon2 + JWT)**. Autorização na camada de aplicação (sem RLS/pgTAP). Sem supabase-js, sem Supabase CLI/Auth/Edge/Storage. Ver [[no-supabase]] e SDD v2.1 (ADR-01/07/08).
 
-**Goal:** Entregar o MVP modo SINGLE do SDD v2.0: uma história infantil gerada por IA, moderada, e lida de ponta a ponta nas 3 plataformas, com quota/billing, sob RLS e consentimento parental.
+**Goal:** Entregar o MVP modo SINGLE do SDD v2.1: uma história infantil gerada por IA, moderada, e lida de ponta a ponta nas 3 plataformas, com quota/billing, autenticada e autorizada pela API.
 
-**Architecture:** Monorepo pnpm. App Expo Router (`apps/mobile`) consome Supabase (Postgres+RLS, Auth, Storage, Edge Functions). Schemas de validação (zod) e tipos do banco vivem em `packages/shared`, importados tanto pelo app (Node/Metro) quanto pelas Edge Functions (Deno, via import map) — contrato único. Backend de IA é uma Edge Function com adapter de provedor configurável em banco. Billing via RevenueCat. Tudo versionado em migrations SQL com suíte de testes RLS (pgTAP) rodando em CI.
+**Architecture:** Monorepo pnpm. App **Expo Router** (`apps/mobile`) consome uma **API Fastify** (`apps/api`) por REST — nunca toca o banco direto. A API usa **Drizzle ORM** sobre **PostgreSQL** (Docker em dev/test/CI; instância gerenciada em prod), emite **JWT** (auth própria, argon2), e concentra auth, autorização, pipeline de IA, webhooks de billing e LGPD. Contratos (zod) e tipos compartilhados vivem em `packages/shared`, usados por app e API.
 
-**Tech Stack:** pnpm workspaces · Expo Router + React Native + NativeWind · TypeScript · Supabase (CLI local + Docker) · Deno (edge) · zod · pgTAP · RevenueCat · GitHub Actions.
+**Tech Stack:** pnpm workspaces · Expo Router + React Native + NativeWind · **Fastify** · **Drizzle ORM + drizzle-kit** · **PostgreSQL (Docker)** · zod · vitest · argon2 + jsonwebtoken · RevenueCat · GitHub Actions.
 
-**Referência de spec:** [sdd-plan-project.md](../../../sdd-plan-project.md) (SDD v2.0).
+**Referência de spec:** [sdd-plan-project.md](../../../sdd-plan-project.md) (SDD v2.1).
 
 ---
 
 ## Princípios transversais (valem para todos os WPs)
 
-- **TDD onde há lógica**, gate de verificação onde é infra/scaffold. Testes reais: zod (vitest), RLS (pgTAP), edge functions (Deno test), app (jest-expo + Maestro nos fluxos críticos).
-- **Migrations imutáveis**: nunca editar uma migration já aplicada/commitada; criar nova (inclusive para *remover* a tabela `health` de smoke — ver WP1).
-- **Segredos nunca no cliente nem no git** (ADR-07): `.env.example` versionado; valores reais em `.env` (gitignored) e em Supabase Vault / secrets das functions.
-- **Toda escrita sensível** (quota `usage_records`, billing, `moderation_status`) só via Edge Function com service role — nunca pelo cliente (Seção 6.4 do SDD).
-- **Strings de UI externalizadas desde a primeira tela** (RNF-07): a camada i18n (pt-BR) é montada no WP2 e toda WP de UI (WP2/WP3/WP6) a usa — sem texto hardcoded.
-- **RLS não basta estar habilitado**: as suítes pgTAP afirmam tanto RLS habilitado quanto que a persona errada (estranho/anônimo) é **negada** — habilitar RLS com `using(true)` não conta como protegido.
-- **Modo SINGLE/MULTI no banco**: políticas RLS NÃO enxergam o `APP_MODE` de build do app. O modo efetivo é lido de `app_settings` (por `app_slug`); políticas e checagens server-side usam esse valor, não o env do cliente.
+- **O app nunca fala com o banco** — só com a API Fastify. Toda autorização é na API (queries escopadas por `user_id` do JWT).
+- **TDD onde há lógica**, gate de verificação onde é infra. Testes reais: zod (vitest), **rotas/serviços da API (vitest de integração contra Postgres de teste em Docker)**, app (jest-expo + Maestro nos fluxos críticos).
+- **Migrations imutáveis** geradas por `drizzle-kit generate`; aplicadas por `drizzle-kit migrate`. Nunca editar migration já aplicada/commitada — gerar nova.
+- **Segredos só no servidor** (ADR-07): `DATABASE_URL`, segredos de JWT, API keys vivem no `.env` da API (gitignored) / secret manager. `.env.example` versionado.
+- **Escrita sensível** (quota `usage_records`, billing, `moderation_status`) só em serviços internos da API — nunca rota de escrita do cliente.
+- **Strings de UI externalizadas desde a primeira tela** (RNF-07): camada i18n (pt-BR) montada no WP2; toda WP de UI a usa.
+- **Isolamento multi-tenant é testado** (não presumido): cada WP com dados de usuário inclui teste de integração com 4 personas (dono, estranho, admin, anônimo) provando que A não acessa dados de B via API.
+- **Postgres é descartável em dev/test**: `docker compose up -d postgres`; um banco de teste efêmero por suíte. RLS pode ser defesa-em-profundidade futura, não é requisito Fase 1.
 - **Commits frequentes**, um por step verde.
 
 ## Decisões de layout (locked)
@@ -30,83 +31,82 @@
 ```
 /
 ├─ apps/mobile/                 # Expo Router app (package próprio)
-├─ packages/shared/             # @storygen/shared: schemas zod + database.types.ts (gerado)
-├─ supabase/
-│  ├─ config.toml
-│  ├─ migrations/               # DDL + RLS, ordenadas por timestamp
-│  ├─ seed.sql                  # dados determinísticos aplicados por `db reset`
-│  ├─ functions/                # Edge Functions (Deno): story-generate, billing-webhook, lgpd-erasure
-│  ├─ functions/import_map.json # mapeia "zod" -> npm:zod p/ reuso de packages/shared
-│  └─ tests/                    # pgTAP (.sql) — suíte de RLS
-├─ eslint.config.js             # flat config (eslint 9)
+├─ apps/api/                    # Fastify API (package próprio)
+│  ├─ src/db/schema.ts          # Drizzle schema (fonte dos tipos do banco)
+│  ├─ src/routes/ · src/services/
+│  ├─ drizzle/                  # migrations geradas por drizzle-kit
+│  └─ drizzle.config.ts
+├─ packages/shared/             # @storygen/shared: contratos zod + tipos (DTOs API)
+├─ docker-compose.yml           # postgres (dev/test); minio (storage) entra na Fase 2
+├─ eslint.config.js
 ├─ .github/workflows/ci.yml
-├─ pnpm-workspace.yaml          # packages + nodeLinker: hoisted
-├─ package.json                 # root: scripts + devDeps
+├─ pnpm-workspace.yaml
+├─ package.json
 └─ tsconfig.base.json
 ```
 
-Justificativa do monorepo (vs. app único): o SDD compartilha contratos entre app e edge (payloads de API, `PromptContextInput`, enums de domínio). Um pacote `shared` único elimina drift. O custo (config Metro para monorepo + import map Deno) é pago uma vez no WP0.
+Monorepo justifica-se: app e API compartilham contratos (payloads, enums de domínio) via `packages/shared`, eliminando drift.
 
 ---
 
 ## Work Packages
 
-Legenda de status: ⬜ não iniciado · 🔵 plano escrito · ✅ concluído.
+Legenda: ⬜ não iniciado · 🔵 plano escrito · ✅ concluído.
 
 ### ⬜ WP0 — Fundação & tooling  → **plano executável: [2026-06-13-wp0-foundation.md](2026-06-13-wp0-foundation.md)**
-Monorepo pnpm; app Expo Router bootando na web; `packages/shared` com schema zod testado; Supabase local (Docker) com migration smoke + `db reset` + geração de tipos; pgTAP rodando; client Supabase no app lendo do banco local; CI verde.
-**Done quando:** `pnpm ci:local` (typecheck do workspace incl. app + lint flat-config + testes shared + `supabase db reset` + `supabase test db`) passa, e o app exibe um dado vindo do Postgres local.
+Monorepo pnpm; app Expo bootando; `packages/shared` com contrato zod testado; **Postgres via `docker-compose`**; **API Fastify (`apps/api`)** com Drizzle conectado ao Postgres, primeira migration e rota `GET /health` que lê o banco; teste de integração vitest da rota contra Postgres de teste; app consumindo `/health` da API; NativeWind; CI verde.
+**Done quando:** `pnpm ci:local` (typecheck do workspace + lint + testes shared + **subir Postgres + drizzle migrate + vitest de integração da API**) passa; `GET /health` retorna status lido do Postgres; app compila consumindo a API.
 **Depende de:** nada.
 
-### ⬜ WP1 — Modelo de dados completo + RLS
-Traduzir todo o DDL da Seção 6.3 do SDD em migrations ordenadas (extensões → tabelas núcleo → domínio criativo → IA → governança → app_settings). Migration dedicada que **remove a tabela `health`** de smoke do WP0 (`drop table public.health cascade`). Triggers `set_updated_at`. Habilitar RLS em todas as tabelas com as políticas da Seção 6.4. Suíte pgTAP que valida cada política com 4 personas (dono, estranho, admin, anônimo), afirmando **acesso do dono E negação do estranho/anônimo**. Gerar `database.types.ts` em `packages/shared`.
-**Escopo por fase (DDL presente ≠ política funcional Fase-1):** `collaborations` é **Fase 3** e `ratings`/`notifications` são **Fase 2** — criadas como schema apenas, com RLS restritiva mínima (negar tudo a não-admin), sem fluxo funcional na Fase 1.
-**Done quando:** todas as tabelas existem; RLS habilitado em 100% delas; tabela `health` não existe mais (assert pgTAP); suíte pgTAP cobre cada política Fase-1 (dono lê/escreve; estranho/anônimo negados; `stories` public só visível com `moderation_status='APPROVED'`); guard de CI falha se alguma política usar `USING (true)` para `anon`/`authenticated` em tabela não-pública; tudo verde em `supabase test db`.
+### ⬜ WP1 — Modelo de dados (Drizzle) + harness de autorização
+Traduzir todo o DDL da Seção 6.3 do SDD para o **schema Drizzle** (`apps/api/src/db/schema.ts`): núcleo de contas (incl. `password_hash`, `refresh_tokens`), domínio criativo, IA, governança, `app_settings`. Gerar e aplicar migrations. Remover a tabela `health` de smoke do WP0 (nova migration). Repositórios/queries-base **sempre escopadas por usuário**. Harness de teste de integração (Postgres efêmero) com as 4 personas.
+**Escopo por fase:** `collaborations` (Fase 3) e `ratings`/`notifications` (Fase 2) entram como schema apenas, sem rotas funcionais na Fase 1.
+**Done quando:** todas as tabelas existem via migrations; `drizzle-kit migrate` aplica limpo num banco novo; tabela `health` removida; testes de integração provam isolamento por usuário nas queries-base (dono acessa, estranho é negado); CI verde.
 **Depende de:** WP0.
-**Cobre SDD:** Seção 6 inteira (DDL); Seção 6.4 (RLS Fase-1).
+**Cobre SDD:** Seção 6 (schema Drizzle), Seção 6.4 (autorização de app).
 
-### ⬜ WP2 — Auth + consentimento parental + perfis infantis
-Supabase Auth (e-mail/senha + Apple Sign-In no iOS — RF-01). Trigger que cria linha em `users` ao registrar (`auth_id`). Fluxo de consentimento parental (RF-02): tela-gate que bloqueia o **uso do app** até `consent_records` ter `PARENTAL_DATA` granted na versão vigente. CRUD de `child_profiles` (RF-03) sob RLS `guardian_id = auth.uid()`. RBAC via claim no JWT espelhando `users.role`. Camada i18n (pt-BR) montada aqui e usada por todas as telas (RNF-07).
-**Done quando:** registro (e-mail/senha) → consentimento → criar perfil infantil funciona; **fluxo Apple Sign-In no iOS** demonstrado (RF-01); sem consentimento, o **gate de UI bloqueia o app** (o bloqueio da *geração* é verificado no WP4, onde o endpoint existe); testes RLS de `child_profiles` verdes (dono acessa, estranho negado); teste e2e (Maestro) do gate; nenhuma string de UI hardcoded.
+### ⬜ WP2 — Auth (argon2 + JWT) + consentimento parental + perfis infantis
+Rotas da API: registro (e-mail/senha, hash argon2), login (emite access+refresh JWT), refresh com rotação (`refresh_tokens`), logout. Apple Sign-In no iOS (RF-01). Middleware de auth/RBAC (claims `USER/MODERATOR/ADMIN`). Fluxo de consentimento parental (RF-02): gate que bloqueia uso do app até `consent_records` ter `PARENTAL_DATA` granted na versão vigente. CRUD de `child_profiles` (RF-03) escopado por `guardian_id`. Camada i18n (pt-BR) montada aqui (RNF-07).
+**Done quando:** registro→login→refresh funciona (JWT válidos, refresh rotaciona e revoga o antigo); senha nunca em claro (argon2); Apple Sign-In no iOS demonstrado; gate de consentimento bloqueia o app sem consentimento; CRUD de `child_profiles` isolado por responsável (teste de integração: estranho negado); nenhuma string de UI hardcoded.
 **Depende de:** WP1.
-**Cobre SDD:** RF-01..04, RNF-07, Seção 11.1 (consentimento). *(RF-05 conta dependente = Fase 2.)*
+**Cobre SDD:** RF-01..04, RNF-07, Seção 11.1, ADR-08. *(RF-05 conta dependente = Fase 2.)*
 
-### ⬜ WP3 — Domínio criativo (CRUD) + UX de leitura (SINGLE) + limite de universos
-CRUD (PostgREST/edge) de universos, personagens, temas, arcos — restrito a ADMIN/MODERATOR no modo SINGLE. **Enforcement do modo no banco**: políticas leem o modo de `app_settings` (por `app_slug`); `app_settings.single_mode_universe_id` aponta o universo fixo. **Limite `plans.max_universes` (parte de RF-14)**: criação de universo bloqueada acima do limite do plano, contabilizada/checada server-side. UX de leitura infantil: lista de histórias do universo fixo + tela de leitura (tipografia escalável, acessível — RNF-06) com **orçamento de latência de leitura p95 ≤ 800 ms (RNF-02)**. Upload de imagem de personagem (Storage). **Fixture seedado** de uma `stories` com `moderation_status='APPROVED'` para testar a tela de leitura sem depender do WP4.
-**Done quando:** admin cria universo/personagem/tema/arco; criar universo além de `max_universes` é negado; usuário final em modo SINGLE vê só leitura (verificado por RLS contra o modo em `app_settings`); tela de leitura renderiza a história APPROVED seedada; leitura dentro do orçamento RNF-02 (medido).
+### ⬜ WP3 — Domínio criativo (CRUD na API) + UX de leitura (SINGLE) + limite de universos
+Rotas CRUD de universos/personagens/temas/arcos — restritas a ADMIN/MODERATOR no modo SINGLE. **Modo lido de `app_settings`** (por `app_slug`); `single_mode_universe_id` aponta o universo fixo. Limite `plans.max_universes` (parte de RF-14) imposto na criação. UX de leitura infantil (lista + tela de leitura acessível, tipografia escalável — RNF-06) com orçamento p95 ≤ 800 ms (RNF-02). Upload de imagem de personagem via API (presigned URL para S3/MinIO; na Fase 1 pode ser disco local). Fixture seedado de uma `stories` `APPROVED` para testar leitura sem o WP4.
+**Done quando:** admin cria universo/personagem/tema/arco; criar universo além de `max_universes` é negado pela API; usuário final em SINGLE só lê (autorização da API verificada por teste); tela de leitura renderiza a história APPROVED seedada; leitura dentro do RNF-02.
 **Depende de:** WP1, WP2.
-**Cobre SDD:** RF-10..13, RF-14 (parcial: `max_universes`), RF-46, RNF-02, RNF-06, Seção 10.
+**Cobre SDD:** RF-10..13, RF-14 (universos), RF-46, RNF-02, RNF-06, Seção 10.
 
-### ⬜ WP4 — Pipeline de geração de IA + quota (endpoint autocontido)
-Edge Function `story-generate` (Seção 8): valida **consentimento** (parental granted) + **quota** + **assinatura** → sanitiza `user_guidance` (8.2) → coleta contexto clima/horário (OpenWeatherMap + cache 30min, fallback determinístico por seed) → monta prompt do `prompt_templates` ativo → chama provedor via adapter (`ai_providers`, structured output JSON, retry≤2, fallback) → **gate de moderação** (8.4) → grava `stories` (incl. snapshot `user_guidance`) + atualiza `story_arcs.summary` (lock otimista `version`) + `usage_records` + custo. **Quota 100% aqui** (RF-14 stories): lê `usage_records` do mês vs. `plans.max_stories_per_month`, retorna `402 QUOTA_EXCEEDED`, e só incrementa uso em sucesso. **Gate de assinatura testado contra `subscriptions` seedado** (o webhook real chega no WP5). Editor de prompt (`prompt_templates`) e provedores (`ai_providers`) seedados. **RNF-01**: latência de geração p95 ≤ 25 s + UI de progresso no app.
-**Done quando:** `POST /stories/generate` retorna 201 com história APPROVED (assinatura ativa via fixture seedado); reprovação na moderação devolve 422 sem consumir quota; exceder `max_stories_per_month` devolve 402 sem gerar; sem consentimento → bloqueado; arco contínuo respeita summary; corpus adversarial de moderação 100% bloqueado (regressão); p95 ≤ 25 s medido; UI de progresso presente.
+### ⬜ WP4 — Pipeline de geração de IA (serviço da API) + quota
+Rota `POST /stories/generate` (Seção 8): valida **consentimento + quota + assinatura** → sanitiza `user_guidance` (8.2) → coleta contexto clima/horário (OpenWeatherMap + cache 30min, fallback determinístico por seed) → monta prompt do `prompt_templates` ativo → chama provedor via adapter (`ai_providers`, structured output JSON, retry≤2, fallback) → **gate de moderação** (8.4) → grava `stories` (incl. snapshot `user_guidance`) + atualiza `story_arcs.summary` (lock otimista `version`) + `usage_records` + custo. **Quota 100% aqui** (RF-14 stories): `usage_records` do mês vs. `plans.max_stories_per_month`, retorna `402`, só incrementa em sucesso. **Gate de assinatura testado contra `subscriptions` seedado** (webhook real no WP5). Editor de prompt e provedores seedados. RNF-01: p95 ≤ 25 s + UI de progresso.
+**Done quando:** `POST /stories/generate` → 201 com história APPROVED (assinatura ativa via fixture); moderação reprovada → 422 sem consumir quota; exceder quota → 402 sem gerar; sem consentimento → bloqueado; arco contínuo respeita summary; corpus adversarial de moderação 100% bloqueado; p95 ≤ 25 s; UI de progresso.
 **Depende de:** WP1, WP2, WP3.
-**Cobre SDD:** RF-20..25, RF-14 (stories), RNF-01, Seção 7.2, Seção 8 inteira.
+**Cobre SDD:** RF-20..25, RF-14 (stories), RNF-01, Seção 7.2, Seção 8.
 
 ### ⬜ WP5 — Billing (RevenueCat) — sincronização de assinatura
-SDK RevenueCat no app (IAP iOS/Android, Stripe web). Edge Function `billing-webhook` (assinada) sincroniza `subscriptions` (estado canônico). Máquina de estados `ACTIVE/PAST_DUE/CANCELED/EXPIRED` + grace period (RF-51). Mapeamento plano→entitlement RevenueCat. Tela de gestão aponta para o canal de origem (RF-52). **Não** redefine quota (já no WP4) — apenas alimenta `subscriptions` que o WP4 consome.
-**Done quando:** compra sandbox ativa assinatura via webhook → `subscriptions` ACTIVE → WP4 passa a gerar; cancelamento/expiração transiciona estado e (após grace) rebaixa limites; máquina de estados testada; tela de gestão abre o canal correto.
+SDK RevenueCat no app (IAP iOS/Android, Stripe web). Rota `POST /billing/webhook` (assinada) sincroniza `subscriptions`. Máquina de estados `ACTIVE/PAST_DUE/CANCELED/EXPIRED` + grace period (RF-51). Mapeamento plano→entitlement. Tela de gestão aponta para o canal de origem (RF-52). Não redefine quota (já no WP4) — só alimenta `subscriptions`.
+**Done quando:** compra sandbox → webhook → `subscriptions` ACTIVE → WP4 gera; cancelamento/expiração transiciona e (após grace) rebaixa; máquina de estados testada; tela abre canal correto.
 **Depende de:** WP1, WP4.
-**Cobre SDD:** RF-50..52, Seção 8.5 (rate limit de geração por plano), mapeamento de entitlement de RF-40.
+**Cobre SDD:** RF-50..52, Seção 8.5, mapeamento de entitlement de RF-40.
 
 ### ⬜ WP6 — Painel administrativo
-Telas admin (web-first via Expo Web): **CRUD de planos (RF-40)**, usuários (suspensão/papéis), editor de `prompt_templates` (versionamento/preview/rollback — RF-42), `ai_providers` (RF-43), fila de `reports` com ações (RF-44), `app_settings` (tema/logo/flags/modo — RF-46), visualização de `audit_logs`, **painel LGPD (RF-45)**: lista requisições de exclusão/anonimização, status de execução e logs de conformidade (dispara a função do WP7b). Toda ação admin grava em `audit_logs`.
-**Notificações:** entrega de `notifications` (ex.: MODERATION_ACTION ao usuário) está **fora do escopo Fase-1** (a tabela existe; a maioria dos tipos serve Fase 2/3). WP6 só registra a ação e audita.
-**Done quando:** CRUD de prompt com versionamento/rollback funciona (verificável só com WP1); admin resolve uma denúncia e a ação fica auditada; painel LGPD lista e dispara uma requisição. *(A verificação "a próxima geração usa o novo template ativo" é e2e e exige WP4 — listada como item dependente de WP4.)*
-**Depende de:** WP1 (CRUD/versionamento). Item e2e do template ativo: **+WP4**.
+Telas admin (web-first via Expo Web) + rotas `/admin/*`: CRUD de planos (RF-40), usuários (suspensão/papéis), editor de `prompt_templates` (versionamento/preview/rollback — RF-42), `ai_providers` (RF-43), fila de `reports` (RF-44), `app_settings` (tema/logo/flags/modo — RF-46), `audit_logs`, painel LGPD (RF-45). Toda ação admin grava `audit_logs`.
+**Notificações:** entrega de `notifications` fora do escopo Fase-1.
+**Done quando:** CRUD de prompt com versionamento/rollback; admin resolve denúncia auditada; painel LGPD dispara requisição. *(verificação e2e "próxima geração usa novo template" requer WP4.)*
+**Depende de:** WP1 (CRUD/versionamento). Item e2e do template: +WP4.
 **Cobre SDD:** RF-40 (CRUD), RF-42..46, Seção 8.4 (camada humana).
 
 ### ⬜ WP7a — Observabilidade & hardening
-Sentry (app + edge), logs estruturados com `request_id`, dashboard de custo de geração (RNF-05). Rate limits por usuário/plano (RNF-04). SLO de disponibilidade 99,5%/mês + monitoração (RNF-03). Backups diários + **teste de restore documentado e executado uma vez em staging** (RNF-09).
-**Done quando:** Sentry recebe um erro de teste (app e edge); logs carregam `request_id`; rate limit retorna 429 ao exceder; SLO/monitor configurado; restore de backup executado em staging com sucesso.
-**Depende de:** WP1 (pode iniciar cedo; rate limit de geração integra-se ao WP4).
+Sentry (app + API), logs estruturados com `request_id`, dashboard de custo de geração (RNF-05). Rate limits por usuário/plano (RNF-04). SLO 99,5%/mês + monitoração (RNF-03). Backups diários do Postgres + teste de restore em staging (RNF-09).
+**Done quando:** Sentry recebe erro de teste (app e API); logs com `request_id`; rate limit → 429; SLO/monitor configurado; restore executado em staging.
+**Depende de:** WP1.
 **Cobre SDD:** RNF-03/04/05/09.
 
 ### ⬜ WP7b — LGPD-erasure de conteúdo
-Edge Function `lgpd-erasure` (Seção 11.2): soft-delete em cascata + anonimização de `characters` E de `stories.content` via snapshot `character_names` + **purge de `prompt_used` e do snapshot `user_guidance`** (coluna adicionada à DDL de `stories`) + hash de e-mail + `audit_logs` evento `LGPD_ERASURE`. Job de retenção (exclusão física pós-período).
-**Done quando:** `DELETE /users/:id` anonimiza inclusive o texto das histórias — **teste afirma que nenhum nome de personagem sobrevive em `stories.content` e nenhum texto de `user_guidance` sobrevive em `prompt_used`**; evento `LGPD_ERASURE` auditado; job de retenção testado.
+Serviço `lgpd-erasure` na API (Seção 11.2): soft-delete em cascata + anonimização de `characters` E de `stories.content` via snapshot `character_names` + purge de `prompt_used` e `user_guidance` + hash de e-mail + `audit_logs` evento `LGPD_ERASURE`. Job de retenção (exclusão física pós-período).
+**Done quando:** `DELETE /users/:id` anonimiza inclusive o texto das histórias — teste afirma que nenhum nome de personagem sobrevive em `stories.content` nem texto de `user_guidance` em `prompt_used`; evento auditado; job de retenção testado.
 **Depende de:** WP1, WP2, WP3, WP4.
-**Cobre SDD:** Seção 11 inteira.
+**Cobre SDD:** Seção 11.
 
 ---
 
@@ -117,14 +117,14 @@ WP0 ──► WP1 ──┬──► WP2 ──► WP3 ──► WP4 ──► W
               │                      │
               │                      └──► WP7b
               ├──► WP6 (CRUD; item e2e do template requer WP4)
-              └──► WP7a (observabilidade; rate-limit de geração integra no WP4)
+              └──► WP7a (observabilidade)
 ```
 
 Caminho crítico: WP0 → WP1 → WP2 → WP3 → WP4 → WP5. WP6 e WP7a paralelizam após WP1. WP7b fecha após WP4.
 
-## Critério de saída da Fase 1 (do SDD §13)
+## Critério de saída da Fase 1 (SDD §13)
 
-História gerada, moderada e lida ponta-a-ponta nas 3 plataformas; quota e billing funcionando; **suíte RLS (pgTAP) e corpus de moderação verdes em CI**; gates de NFR Fase-1 atendidos (RNF-01 p95 geração, RNF-02 p95 leitura, RNF-03 SLO). Quando WP0–WP7b estiverem ✅ e esse pipeline de CI passar, a Fase 1 está concluída.
+História gerada, moderada e lida ponta-a-ponta nas 3 plataformas; quota e billing funcionando; **suíte de autorização (integração da API) e corpus de moderação verdes em CI**; NFRs Fase-1 (RNF-01 p95 geração, RNF-02 p95 leitura, RNF-03 SLO). WP0–WP7b ✅ + CI verde = Fase 1 concluída.
 
 ## Rastreabilidade de requisitos (dono único)
 
@@ -140,3 +140,4 @@ História gerada, moderada e lida ponta-a-ponta nas 3 plataformas; quota e billi
 | Seção 6 / 6.4 | WP1 | | RNF-03/04/05/09 | WP7a |
 | Seção 11 | WP7b (+WP2 consentimento) | | RNF-06 | WP3 |
 | Seção 8 | WP4 | | RNF-07 | WP2 |
+| ADR-08 (auth) | WP2 | | | |
