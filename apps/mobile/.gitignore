@@ -7,7 +7,8 @@ node_modules/
 .expo/
 dist/
 web-build/
-expo-env.d.ts
+# expo-env.d.ts: mantido versionado (conteúdo estático) p/ o typecheck do app
+# rodar em CI sem precisar invocar o Expo. Ver docs/superpowers/plans WP0 Task 2.
 
 # Native
 .kotlin/

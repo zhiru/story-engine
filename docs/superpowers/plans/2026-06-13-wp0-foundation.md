@@ -602,12 +602,12 @@ export const supabase = createClient<Database>(url, anonKey, {
 });
 ```
 
-- [ ] **Step 5: Ler `health` na tela inicial** — editar `apps/mobile/app/(tabs)/index.tsx`:
+- [ ] **Step 5: Ler `health` na tela inicial** — editar `apps/mobile/src/app/index.tsx` (template SDK 56 usa layout `src/app/`; ajuste o import relativo do client p/ `../lib/supabase`):
 
 ```tsx
 import { useEffect, useState } from "react";
 import { Text } from "react-native";
-import { supabase } from "../../src/lib/supabase";
+import { supabase } from "../lib/supabase"; // de src/app/index.tsx para src/lib/supabase.ts
 
 // dentro do componente:
 const [dbStatus, setDbStatus] = useState("...");
@@ -689,9 +689,11 @@ git commit -m "ci: typecheck, lint, shared tests, supabase db reset + pgTAP"
 
 ## Task 8: NativeWind v4 (ADR-03)
 
+> **Layout SDK 56:** o template já traz `apps/mobile/src/global.css` (importado em `src/app/_layout.tsx`) e usa `src/app/`. Reaproveite esse CSS — NÃO crie `apps/mobile/global.css`. Consulte os docs versionados https://docs.expo.dev/versions/v56.0.0/ (ver `apps/mobile/AGENTS.md`). Confirme a compatibilidade NativeWind v4 × Expo SDK 56 antes; se conflitar, reporte (BLOCKED) em vez de forçar.
+
 **Files:**
-- Create: `apps/mobile/tailwind.config.js`, `apps/mobile/global.css`, `apps/mobile/nativewind-env.d.ts`
-- Modify: `apps/mobile/babel.config.js`, `apps/mobile/metro.config.js`, layout raiz
+- Create: `apps/mobile/tailwind.config.js`, `apps/mobile/nativewind-env.d.ts`
+- Modify: `apps/mobile/src/global.css` (adicionar diretivas `@tailwind`), `apps/mobile/babel.config.js`, `apps/mobile/metro.config.js`, `apps/mobile/src/app/_layout.tsx` (já importa o global.css), `apps/mobile/src/app/index.tsx`
 
 - [ ] **Step 1: Instalar NativeWind v4 (pinado) + peers** (`expo install` resolve versões compatíveis com o SDK)
 
@@ -710,7 +712,7 @@ module.exports = {
 };
 ```
 
-- [ ] **Step 3: Criar `apps/mobile/global.css`**
+- [ ] **Step 3: Garantir as diretivas Tailwind em `apps/mobile/src/global.css`** (arquivo já existe no template; adicione no topo se ausentes)
 
 ```css
 @tailwind base;
@@ -755,16 +757,12 @@ config.resolver.nodeModulesPaths = [
   path.resolve(workspaceRoot, "node_modules"),
 ];
 
-module.exports = withNativeWind(config, { input: "./global.css" });
+module.exports = withNativeWind(config, { input: "./src/global.css" });
 ```
 
-- [ ] **Step 7: Importar `global.css` no layout raiz** — em `apps/mobile/app/_layout.tsx`, primeira linha:
+- [ ] **Step 7: Confirmar import do `global.css` no layout raiz** — `apps/mobile/src/app/_layout.tsx` já importa `../global.css` (o template SDK 56 traz isso). Verifique; só adicione se faltar.
 
-```tsx
-import "../global.css";
-```
-
-- [ ] **Step 8: Renderizar elemento estilizado e verificar (gate)** — em `apps/mobile/app/(tabs)/index.tsx`, envolver com `className`:
+- [ ] **Step 8: Renderizar elemento estilizado e verificar (gate)** — em `apps/mobile/src/app/index.tsx`, envolver com `className`:
 
 ```tsx
 import { View, Text } from "react-native";
