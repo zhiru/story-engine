@@ -8,17 +8,18 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "test:shared": "pnpm --filter \"./packages/shared\" test",
-    "db:reset": "supabase db reset",
-    "db:test": "supabase test db",
-    "db:types": "supabase gen types typescript --local > packages/shared/src/database.types.ts",
-    "ci:local": "pnpm typecheck && pnpm lint && pnpm test:shared && supabase db reset && supabase test db"
+    "db:up": "docker compose up -d --wait postgres",
+    "db:down": "docker compose down",
+    "db:generate": "pnpm --filter \"./apps/api\" run db:generate",
+    "db:migrate": "pnpm --filter \"./apps/api\" run db:migrate",
+    "test:api": "pnpm --filter \"./apps/api\" test",
+    "ci:local": "pnpm typecheck && pnpm lint && pnpm test:shared && pnpm db:up && pnpm db:migrate && pnpm test:api"
   },
   "devDependencies": {
     "@eslint/js": "^9",
     "@types/node": "^22",
     "eslint": "^9",
     "prettier": "^3",
-    "supabase": "2.34.3",
     "typescript": "^5.6",
     "typescript-eslint": "^8"
   }

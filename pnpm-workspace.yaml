@@ -2,8 +2,3 @@ packages:
   - "apps/*"
   - "packages/*"
 nodeLinker: hoisted
-# pnpm 10 bloqueia scripts de build de dependências por padrão; o CLI do supabase
-# baixa seu binário via postinstall. Sem este whitelist, `pnpm install --frozen-lockfile`
-# (CI) deixa o binário ausente e `pnpm supabase ...` falha.
-onlyBuiltDependencies:
-  - supabase
