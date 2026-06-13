@@ -10,3 +10,9 @@ export const GenerateStoryInputSchema = z.object({
 });
 
 export type GenerateStoryInput = z.infer<typeof GenerateStoryInputSchema>;
+
+export const HealthResponseSchema = z.object({
+  status: z.literal("ok"),
+  db: z.literal("up"),
+});
+export type HealthResponse = z.infer<typeof HealthResponseSchema>;
