@@ -1,7 +1,7 @@
 import { GenerateStoryInputSchema } from '@storygen/shared';
 import * as Device from 'expo-device';
 import { useEffect, useState } from 'react';
-import { Platform, StyleSheet, Text } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { supabase } from '../lib/supabase';
@@ -75,6 +75,9 @@ export default function HomeScreen() {
           />
         </ThemedView>
 
+        <View className="flex-1 items-center justify-center bg-violet-100">
+          <Text className="text-violet-900 text-xl font-bold">StoryGen</Text>
+        </View>
         <Text>{`shared import: ${sharedOk ? 'OK' : 'FAIL'}`}</Text>
         <Text>{`db health: ${dbStatus}`}</Text>
 

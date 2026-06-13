@@ -1,6 +1,5 @@
-// Expo SDK 52+ já detecta monorepo; mantemos explícito p/ clareza.
-// `@storygen/shared` não declara react/react-native, então não há risco de React duplicado.
 const { getDefaultConfig } = require("expo/metro-config");
+const { withNativeWind } = require("nativewind/metro");
 const path = require("path");
 
 const projectRoot = __dirname;
@@ -13,4 +12,4 @@ config.resolver.nodeModulesPaths = [
   path.resolve(workspaceRoot, "node_modules"),
 ];
 
-module.exports = config;
+module.exports = withNativeWind(config, { input: "./src/global.css" });
