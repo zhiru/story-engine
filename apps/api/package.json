@@ -1,0 +1,27 @@
+{
+  "name": "@storygen/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@storygen/shared": "workspace:*",
+    "drizzle-orm": "^0.36",
+    "fastify": "^5",
+    "postgres": "^3.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "drizzle-kit": "^0.28",
+    "tsx": "^4",
+    "typescript": "^5.6",
+    "vitest": "^2"
+  }
+}
