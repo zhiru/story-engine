@@ -1,7 +1,9 @@
 import { GenerateStoryInputSchema } from '@storygen/shared';
 import * as Device from 'expo-device';
+import { useEffect, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { getHealth } from '../lib/api';
 
 import { AnimatedIcon } from '@/components/animated-icon';
 import { HintRow } from '@/components/hint-row';
@@ -34,6 +36,13 @@ export default function HomeScreen() {
     universe_id: '11111111-1111-1111-1111-111111111111',
   }).success;
 
+  const [apiStatus, setApiStatus] = useState('...');
+  useEffect(() => {
+    getHealth()
+      .then((h) => setApiStatus(`${h.status}/${h.db}`))
+      .catch((e: Error) => setApiStatus(`erro: ${e.message}`));
+  }, []);
+
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
@@ -64,6 +73,7 @@ export default function HomeScreen() {
           <Text className="text-violet-900 text-xl font-bold">StoryGen</Text>
         </View>
         <Text>{`shared import: ${sharedOk ? 'OK' : 'FAIL'}`}</Text>
+        <Text>{`api health: ${apiStatus}`}</Text>
 
         {Platform.OS === 'web' && <WebBadge />}
       </SafeAreaView>
