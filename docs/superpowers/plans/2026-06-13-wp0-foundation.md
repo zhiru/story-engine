@@ -53,6 +53,11 @@ packages:
   - "apps/*"
   - "packages/*"
 nodeLinker: hoisted
+# pnpm 10 bloqueia scripts de build de dependências por padrão; o CLI do supabase
+# baixa seu binário via postinstall. Sem este whitelist, `pnpm install --frozen-lockfile`
+# (CI) deixa o binário ausente e `pnpm supabase ...` falha.
+onlyBuiltDependencies:
+  - supabase
 ```
 
 - [ ] **Step 2: Criar `package.json` raiz**
@@ -109,6 +114,7 @@ nodeLinker: hoisted
 - [ ] **Step 4: Criar `eslint.config.js`** (flat config; ESLint 9 não usa mais `--ext`). Lint focado em `packages/**` + arquivos de config; `apps/mobile` (config Expo própria) e `supabase/functions` (Deno) ganham lint nos seus WPs.
 
 ```js
+// @ts-check
 const js = require("@eslint/js");
 const tseslint = require("typescript-eslint");
 
@@ -116,7 +122,13 @@ module.exports = tseslint.config(
   { ignores: ["**/node_modules/**", "**/.expo/**", "**/dist/**", "apps/mobile/**", "supabase/**"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
-  { files: ["packages/**/*.ts", "*.config.js"] }
+  { files: ["packages/**/*.ts", "*.config.js"] },
+  {
+    // o próprio eslint.config.js é CJS — libera globals de Node p/ não auto-falhar
+    files: ["*.config.js"],
+    languageOptions: { globals: { require: "readonly", module: "writable", __dirname: "readonly" } },
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  }
 );
 ```
 
