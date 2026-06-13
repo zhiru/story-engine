@@ -1,7 +1,10 @@
 import { GenerateStoryInputSchema } from '@storygen/shared';
 import * as Device from 'expo-device';
+import { useEffect, useState } from 'react';
 import { Platform, StyleSheet, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { supabase } from '../lib/supabase';
 
 import { AnimatedIcon } from '@/components/animated-icon';
 import { HintRow } from '@/components/hint-row';
@@ -34,6 +37,18 @@ export default function HomeScreen() {
     universe_id: '11111111-1111-1111-1111-111111111111',
   }).success;
 
+  const [dbStatus, setDbStatus] = useState('...');
+  useEffect(() => {
+    supabase
+      .from('health')
+      .select('status')
+      .limit(1)
+      .single()
+      .then(({ data, error }) =>
+        setDbStatus(error ? `erro: ${error.message}` : (data?.status ?? 'vazio'))
+      );
+  }, []);
+
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
@@ -61,6 +76,7 @@ export default function HomeScreen() {
         </ThemedView>
 
         <Text>{`shared import: ${sharedOk ? 'OK' : 'FAIL'}`}</Text>
+        <Text>{`db health: ${dbStatus}`}</Text>
 
         {Platform.OS === 'web' && <WebBadge />}
       </SafeAreaView>
