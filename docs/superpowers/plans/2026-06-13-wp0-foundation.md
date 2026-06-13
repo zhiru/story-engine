@@ -697,8 +697,8 @@ git commit -m "ci: typecheck, lint, shared tests, supabase db reset + pgTAP"
 
 - [ ] **Step 1: Instalar NativeWind v4 (pinado) + peers** (`expo install` resolve versões compatíveis com o SDK)
 
-Run: `pnpm --filter "./apps/mobile" exec expo install nativewind@^4 tailwindcss react-native-reanimated react-native-safe-area-context`
-Expected: pacotes adicionados; nativewind na linha 4.x.
+Run: `pnpm --filter "./apps/mobile" exec expo install nativewind@^4 tailwindcss@^3 react-native-reanimated react-native-safe-area-context`
+Expected: pacotes adicionados; nativewind 4.x. **Pinar `tailwindcss@^3`**: NativeWind v4 é construído sobre Tailwind v3 e quebra com Tailwind v4 (peer conflict em `react-native-css-interop`). Se `expo install` resolver tailwind 4, rode `expo install tailwindcss@3`.
 
 - [ ] **Step 2: Criar `apps/mobile/tailwind.config.js`**
 
