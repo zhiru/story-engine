@@ -10,6 +10,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   extra: {
     ...config.extra,
     appMode: APP_MODE,
+    appSlug: process.env.APP_SLUG ?? "historias-da-gigi",
     apiUrl: process.env.EXPO_PUBLIC_API_URL ?? "http://127.0.0.1:3000",
   },
 });

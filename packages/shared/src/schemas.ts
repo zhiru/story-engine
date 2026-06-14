@@ -54,11 +54,20 @@ export type Story = z.infer<typeof StorySchema>;
 
 // ── App config ───────────────────────────────────────────────────────────────
 export const AppConfigSchema = z.object({
-  appMode: z.literal("SINGLE"),
-  singleModeUniverseId: z.string().uuid().nullable(),
+  appMode: z.enum(["SINGLE", "MULTI"]),
+  singleModeUniverseId: z.string().uuid().nullable().optional(),
   theme: z.record(z.string()),
 });
 export type AppConfig = z.infer<typeof AppConfigSchema>;
+
+// ── Universe list (MULTI mode) ────────────────────────────────────────────────
+export const UniverseListItemSchema = z.object({
+  id: z.string().uuid(),
+  title: z.string(),
+  description: z.string().optional(),
+  createdAt: z.string().datetime({ offset: true }),
+});
+export type UniverseListItem = z.infer<typeof UniverseListItemSchema>;
 
 // ── Creative CRUD inputs ─────────────────────────────────────────────────────
 export const CreateUniverseInputSchema = z.object({

@@ -10,12 +10,19 @@ import {
   type StoryListItem,
   type Story,
   type GenerateStoryInput,
+  type UniverseListItem,
+  type CreateUniverseInput,
+  type CreateCharacterInput,
+  type CreateThemeInput,
 } from "@storygen/shared";
 
 const apiUrl = (Constants.expoConfig?.extra?.apiUrl as string) ?? "http://127.0.0.1:3000";
+const appSlug = (Constants.expoConfig?.extra?.appSlug as string) ?? "historias-da-gigi";
 
 export async function getHealth(): Promise<HealthResponse> {
-  const res = await fetch(`${apiUrl}/health`);
+  const res = await fetch(`${apiUrl}/health`, {
+    headers: { "X-App-Slug": appSlug },
+  });
   return HealthResponseSchema.parse(await res.json());
 }
 
@@ -35,7 +42,10 @@ async function post<T>(
   body: unknown,
   accessToken?: string,
 ): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-App-Slug": appSlug,
+  };
   if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
   const res = await fetch(`${apiUrl}/api/v1${path}`, {
     method: "POST",
@@ -83,7 +93,10 @@ export async function recordConsent(
 
 async function get<T>(path: string, accessToken: string): Promise<T> {
   const res = await fetch(`${apiUrl}/api/v1${path}`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "X-App-Slug": appSlug,
+    },
   });
   if (!res.ok) {
     const err = (await res.json()) as { error?: string };
@@ -120,4 +133,49 @@ export async function generateStory(
   accessToken: string,
 ): Promise<GenerateStoryResult> {
   return post<GenerateStoryResult>("/stories/generate", input, accessToken);
+}
+
+// ── MULTI mode functions ──────────────────────────────────────────────────────
+
+export async function listMyUniverses(accessToken: string): Promise<UniverseListItem[]> {
+  return get<UniverseListItem[]>("/universes/mine", accessToken);
+}
+
+export interface CreateUniverseResult {
+  id: string;
+  title: string;
+  description: string;
+}
+
+export async function createUniverse(
+  input: CreateUniverseInput,
+  accessToken: string,
+): Promise<CreateUniverseResult> {
+  return post<CreateUniverseResult>("/universes", input, accessToken);
+}
+
+export interface AddCharacterResult {
+  id: string;
+  name: string;
+}
+
+export async function addCharacter(
+  universeId: string,
+  input: CreateCharacterInput,
+  accessToken: string,
+): Promise<AddCharacterResult> {
+  return post<AddCharacterResult>(`/universes/${universeId}/characters`, input, accessToken);
+}
+
+export interface AddThemeResult {
+  id: string;
+  title: string;
+}
+
+export async function addTheme(
+  universeId: string,
+  input: CreateThemeInput,
+  accessToken: string,
+): Promise<AddThemeResult> {
+  return post<AddThemeResult>(`/universes/${universeId}/themes`, input, accessToken);
 }

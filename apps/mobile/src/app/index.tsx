@@ -10,59 +10,60 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../auth/AuthContext';
-import { getConfig, listStories, generateStory, ApiError } from '../lib/api';
-import type { StoryListItem } from '@storygen/shared';
+import {
+  getConfig,
+  listStories,
+  listMyUniverses,
+  generateStory,
+  ApiError,
+} from '../lib/api';
+import type { StoryListItem, UniverseListItem } from '@storygen/shared';
 
-export default function HomeScreen() {
+// ── SINGLE mode view ──────────────────────────────────────────────────────────
+function SingleModeView({
+  accessToken,
+  universeId,
+}: {
+  accessToken: string;
+  universeId: string;
+}) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const router = useRouter() as any;
-  const { accessToken } = useAuth();
-
   const [stories, setStories] = useState<StoryListItem[]>([]);
-  const [universeId, setUniverseId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [generateMessage, setGenerateMessage] = useState<string | null>(null);
 
-  const loadStories = useCallback(async () => {
-    if (!accessToken) return;
+  const load = useCallback(async () => {
     try {
       setError(null);
-      const config = await getConfig(accessToken);
-      if (!config.singleModeUniverseId) {
-        setError('Universo não configurado.');
-        return;
-      }
-      setUniverseId(config.singleModeUniverseId);
-      const list = await listStories(config.singleModeUniverseId, accessToken);
+      const list = await listStories(universeId, accessToken);
       setStories(list);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Erro ao carregar histórias.');
     }
-  }, [accessToken]);
+  }, [universeId, accessToken]);
 
   useEffect(() => {
     setLoading(true);
-    void loadStories().finally(() => setLoading(false));
-  }, [loadStories]);
+    void load().finally(() => setLoading(false));
+  }, [load]);
 
   async function handleRefresh() {
     setRefreshing(true);
-    await loadStories();
+    await load();
     setRefreshing(false);
   }
 
   async function handleGenerate() {
-    if (!accessToken || !universeId || generating) return;
+    if (generating) return;
     setGenerating(true);
     setGenerateMessage(null);
-
     try {
       const result = await generateStory({ universe_id: universeId }, accessToken);
-      // Refresh story list then navigate to the new story
-      await loadStories();
+      await load();
       router.push(`/story/${result.id}`);
     } catch (e: unknown) {
       if (e instanceof ApiError) {
@@ -95,7 +96,7 @@ export default function HomeScreen() {
     return (
       <View style={styles.center}>
         <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={() => void loadStories()}>
+        <TouchableOpacity style={styles.retryButton} onPress={() => void load()}>
           <Text style={styles.retryText}>Tentar novamente</Text>
         </TouchableOpacity>
       </View>
@@ -106,11 +107,10 @@ export default function HomeScreen() {
     <View style={styles.container}>
       <Text style={styles.heading}>Historias da Gigi</Text>
 
-      {/* Generate button */}
       <TouchableOpacity
         style={[styles.generateButton, generating && styles.generateButtonDisabled]}
         onPress={() => void handleGenerate()}
-        disabled={generating || !universeId}
+        disabled={generating}
         accessible
         accessibilityRole="button"
         accessibilityLabel="Gerar nova historia"
@@ -169,6 +169,347 @@ export default function HomeScreen() {
   );
 }
 
+// ── MULTI mode: universe stories sub-view ─────────────────────────────────────
+function UniverseStoriesView({
+  universe,
+  accessToken,
+  onBack,
+}: {
+  universe: UniverseListItem;
+  accessToken: string;
+  onBack: () => void;
+}) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const router = useRouter() as any;
+  const [stories, setStories] = useState<StoryListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [generateMessage, setGenerateMessage] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setError(null);
+      const list = await listStories(universe.id, accessToken);
+      setStories(list);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Erro ao carregar histórias.');
+    }
+  }, [universe.id, accessToken]);
+
+  useEffect(() => {
+    setLoading(true);
+    void load().finally(() => setLoading(false));
+  }, [load]);
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }
+
+  async function handleGenerate() {
+    if (generating) return;
+    setGenerating(true);
+    setGenerateMessage(null);
+    try {
+      const result = await generateStory({ universe_id: universe.id }, accessToken);
+      await load();
+      router.push(`/story/${result.id}`);
+    } catch (e: unknown) {
+      if (e instanceof ApiError) {
+        if (e.status === 402) {
+          setGenerateMessage('Voce atingiu o limite de historias do seu plano este mes.');
+        } else if (e.status === 403) {
+          setGenerateMessage('Voce precisa de uma assinatura ativa para gerar historias.');
+        } else {
+          setGenerateMessage('Erro ao gerar historia. Tente novamente.');
+        }
+      } else {
+        setGenerateMessage('Erro ao gerar historia. Tente novamente.');
+      }
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#7C3AED" />
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={() => void load()}>
+          <Text style={styles.retryText}>Tentar novamente</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <TouchableOpacity style={styles.backRow} onPress={onBack}>
+        <Text style={styles.backLink}>← Universos</Text>
+      </TouchableOpacity>
+
+      <Text style={styles.heading}>{universe.title}</Text>
+
+      <TouchableOpacity
+        style={[styles.generateButton, generating && styles.generateButtonDisabled]}
+        onPress={() => void handleGenerate()}
+        disabled={generating}
+        accessible
+        accessibilityRole="button"
+        accessibilityLabel="Gerar nova historia"
+      >
+        {generating ? (
+          <View style={styles.generateButtonInner}>
+            <ActivityIndicator size="small" color="#ffffff" />
+            <Text style={styles.generateButtonText}>Gerando historia...</Text>
+          </View>
+        ) : (
+          <Text style={styles.generateButtonText}>Gerar nova historia</Text>
+        )}
+      </TouchableOpacity>
+
+      {generateMessage ? (
+        <Text style={styles.generateMessageText}>{generateMessage}</Text>
+      ) : null}
+
+      {stories.length === 0 ? (
+        <View style={styles.centerFlex}>
+          <Text style={styles.emptyText}>Nenhuma historia neste universo ainda.</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={stories}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.list}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => void handleRefresh()}
+              tintColor="#7C3AED"
+            />
+          }
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={styles.card}
+              onPress={() => router.push(`/story/${item.id}`)}
+              accessible
+              accessibilityRole="button"
+              accessibilityLabel={`Ler historia: ${item.title}`}
+            >
+              <Text style={styles.cardTitle}>{item.title}</Text>
+              <Text style={styles.cardDate}>
+                {new Date(item.createdAt).toLocaleDateString('pt-BR', {
+                  day: 'numeric',
+                  month: 'long',
+                  year: 'numeric',
+                })}
+              </Text>
+            </TouchableOpacity>
+          )}
+        />
+      )}
+    </View>
+  );
+}
+
+// ── MULTI mode: universe list view ────────────────────────────────────────────
+function MultiModeView({ accessToken }: { accessToken: string }) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const router = useRouter() as any;
+  const [universes, setUniverses] = useState<UniverseListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedUniverse, setSelectedUniverse] = useState<UniverseListItem | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setError(null);
+      const list = await listMyUniverses(accessToken);
+      setUniverses(list);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Erro ao carregar universos.');
+    }
+  }, [accessToken]);
+
+  useEffect(() => {
+    setLoading(true);
+    void load().finally(() => setLoading(false));
+  }, [load]);
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }
+
+  // When returning from create-universe screen, refresh the list
+  useEffect(() => {
+    const unsubscribe = router.addListener?.('focus', () => {
+      void load();
+    });
+    return unsubscribe;
+  }, [router, load]);
+
+  if (selectedUniverse) {
+    return (
+      <UniverseStoriesView
+        universe={selectedUniverse}
+        accessToken={accessToken}
+        onBack={() => setSelectedUniverse(null)}
+      />
+    );
+  }
+
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#7C3AED" />
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={() => void load()}>
+          <Text style={styles.retryText}>Tentar novamente</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.heading}>Meus Universos</Text>
+
+      <TouchableOpacity
+        style={styles.generateButton}
+        onPress={() => router.push('/create-universe')}
+        accessible
+        accessibilityRole="button"
+        accessibilityLabel="Criar universo"
+      >
+        <Text style={styles.generateButtonText}>+ Criar universo</Text>
+      </TouchableOpacity>
+
+      {universes.length === 0 ? (
+        <View style={styles.centerFlex}>
+          <Text style={styles.emptyText}>Voce ainda nao tem universos. Crie um acima!</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={universes}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.list}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => void handleRefresh()}
+              tintColor="#7C3AED"
+            />
+          }
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={styles.card}
+              onPress={() => setSelectedUniverse(item)}
+              accessible
+              accessibilityRole="button"
+              accessibilityLabel={`Abrir universo: ${item.title}`}
+            >
+              <Text style={styles.cardTitle}>{item.title}</Text>
+              {item.description ? (
+                <Text style={styles.cardDate} numberOfLines={2}>{item.description}</Text>
+              ) : null}
+            </TouchableOpacity>
+          )}
+        />
+      )}
+    </View>
+  );
+}
+
+// ── Root home screen ──────────────────────────────────────────────────────────
+export default function HomeScreen() {
+  const { accessToken } = useAuth();
+
+  const [appMode, setAppMode] = useState<'SINGLE' | 'MULTI' | null>(null);
+  const [singleUniverseId, setSingleUniverseId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadConfig = useCallback(async () => {
+    if (!accessToken) return;
+    try {
+      setError(null);
+      const config = await getConfig(accessToken);
+      setAppMode(config.appMode);
+      if (config.appMode === 'SINGLE') {
+        setSingleUniverseId(config.singleModeUniverseId ?? null);
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Erro ao carregar configuracao.');
+    }
+  }, [accessToken]);
+
+  useEffect(() => {
+    setLoading(true);
+    void loadConfig().finally(() => setLoading(false));
+  }, [loadConfig]);
+
+  if (loading || !accessToken) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#7C3AED" />
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={() => void loadConfig()}>
+          <Text style={styles.retryText}>Tentar novamente</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (appMode === 'SINGLE') {
+    if (!singleUniverseId) {
+      return (
+        <View style={styles.center}>
+          <Text style={styles.errorText}>Universo nao configurado.</Text>
+        </View>
+      );
+    }
+    return <SingleModeView accessToken={accessToken} universeId={singleUniverseId} />;
+  }
+
+  if (appMode === 'MULTI') {
+    return <MultiModeView accessToken={accessToken} />;
+  }
+
+  return (
+    <View style={styles.center}>
+      <ActivityIndicator size="large" color="#7C3AED" />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -194,6 +535,15 @@ const styles = StyleSheet.create({
     color: '#1E1B4B',
     paddingHorizontal: 20,
     paddingBottom: 12,
+  },
+  backRow: {
+    paddingHorizontal: 20,
+    paddingBottom: 8,
+  },
+  backLink: {
+    fontSize: 16,
+    color: '#7C3AED',
+    fontWeight: '600',
   },
   generateButton: {
     backgroundColor: '#7C3AED',
