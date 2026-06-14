@@ -12,12 +12,15 @@
     "test": "node --env-file .env ../../node_modules/.bin/vitest run"
   },
   "dependencies": {
+    "@node-rs/argon2": "^2.0.2",
     "@storygen/shared": "workspace:*",
     "drizzle-orm": "^0.36",
     "fastify": "^5",
+    "jsonwebtoken": "^9.0.3",
     "postgres": "^3.4"
   },
   "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22",
     "drizzle-kit": "^0.28",
     "tsx": "^4",
