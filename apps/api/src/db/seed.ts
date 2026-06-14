@@ -1,6 +1,6 @@
 /**
- * Seed SINGLE-mode data (idempotent — safe to run multiple times).
- * Uses fixed UUIDs so repeated runs hit onConflictDoNothing.
+ * Seed SINGLE-mode data + TRIAL plan + MULTI app_settings (idempotent).
+ * Uses fixed UUIDs so repeated runs hit onConflictDoNothing/onConflictDoUpdate.
  */
 import { eq } from "drizzle-orm";
 import { db } from "./client.js";
@@ -18,6 +18,7 @@ import {
   consentRecords,
 } from "./schema.js";
 import { hashPassword } from "../auth/hash.js";
+import { TRIAL_PLAN_ID } from "./seedConstants.js";
 
 // ── Fixed UUIDs ─────────────────────────────────────────────────────────────
 const ADMIN_ID = "00000000-0000-0000-0000-000000000001";
@@ -27,7 +28,9 @@ const CHARACTER_MASCOTE_ID = "00000000-0000-0000-0000-000000000021";
 const THEME_ID = "00000000-0000-0000-0000-000000000030";
 const STORY_ID = "00000000-0000-0000-0000-000000000040";
 const APP_SETTINGS_ID = "00000000-0000-0000-0000-000000000050";
+const MULTI_APP_SETTINGS_ID = "00000000-0000-0000-0000-000000000051";
 const PLAN_ID = "00000000-0000-0000-0000-000000000060";
+// TRIAL_PLAN_ID imported from seedConstants (shared with auth.ts)
 const SUBSCRIPTION_ID = "00000000-0000-0000-0000-000000000070";
 const AI_PROVIDER_ID = "00000000-0000-0000-0000-000000000080";
 const OMNIROUTE_PROVIDER_ID = "00000000-0000-0000-0000-000000000081";
@@ -57,6 +60,18 @@ async function main() {
       name: "Admin Plan",
       maxUniverses: 100,
       maxStoriesPerMonth: 1000,
+      priceCents: 0,
+    })
+    .onConflictDoNothing();
+
+  // ── TRIAL plan (auto-assigned on register) ─────────────────────────────────
+  await db
+    .insert(plans)
+    .values({
+      id: TRIAL_PLAN_ID,
+      name: "Trial",
+      maxUniverses: 5,
+      maxStoriesPerMonth: 20,
       priceCents: 0,
     })
     .onConflictDoNothing();
@@ -152,18 +167,13 @@ Gigi aprendeu que compartilhar faz as coisas ficarem maiores por dentro — mesm
     })
     .onConflictDoNothing();
 
-  // ── App settings ───────────────────────────────────────────────────────────
-  // Use upsert so theme changes are applied on re-seed
-  const existingSettings = await db
-    .select()
-    .from(appSettings)
-    .where(eq(appSettings.appSlug, "historias-da-gigi"))
-    .limit(1);
-
-  if (existingSettings.length === 0) {
-    await db.insert(appSettings).values({
+  // ── App settings (SINGLE — historias-da-gigi) ──────────────────────────────
+  await db
+    .insert(appSettings)
+    .values({
       id: APP_SETTINGS_ID,
       appSlug: "historias-da-gigi",
+      appMode: "SINGLE",
       singleModeUniverseId: UNIVERSE_ID,
       theme: {
         primary: "#7C3AED",
@@ -175,16 +185,43 @@ Gigi aprendeu que compartilhar faz as coisas ficarem maiores por dentro — mesm
         singleMode: true,
         aiGeneration: false,
       },
-    });
-  } else {
-    await db
-      .update(appSettings)
-      .set({
+    })
+    .onConflictDoUpdate({
+      target: appSettings.id,
+      set: {
+        appMode: "SINGLE",
         singleModeUniverseId: UNIVERSE_ID,
         updatedAt: new Date(),
-      })
-      .where(eq(appSettings.appSlug, "historias-da-gigi"));
-  }
+      },
+    });
+
+  // ── App settings (MULTI — meu-universo) ────────────────────────────────────
+  await db
+    .insert(appSettings)
+    .values({
+      id: MULTI_APP_SETTINGS_ID,
+      appSlug: "meu-universo",
+      appMode: "MULTI",
+      singleModeUniverseId: null,
+      theme: {
+        primary: "#0F766E",
+        secondary: "#CCFBF1",
+        background: "#F0FDFA",
+        text: "#134E4A",
+      },
+      featureFlags: {
+        singleMode: false,
+        aiGeneration: true,
+      },
+    })
+    .onConflictDoUpdate({
+      target: appSettings.id,
+      set: {
+        appMode: "MULTI",
+        singleModeUniverseId: null,
+        updatedAt: new Date(),
+      },
+    });
 
   // ── AI Providers ───────────────────────────────────────────────────────────
   // Primário: gateway compatível com OpenAI (OmniRoute -> Claude). A chave vem do
@@ -306,7 +343,8 @@ Responda EXATAMENTE neste formato JSON (sem markdown, sem texto fora do JSON):
   console.log(`   story           : ${STORY_ID}`);
   console.log(`   ai_provider     : ${AI_PROVIDER_ID} (stub)`);
   console.log(`   prompt_template : ${PROMPT_TEMPLATE_ID}`);
-  console.log(`   app_settings    : historias-da-gigi`);
+  console.log(`   app_settings    : historias-da-gigi (SINGLE), meu-universo (MULTI)`);
+  console.log(`   trial_plan      : ${TRIAL_PLAN_ID}`);
 
   process.exit(0);
 }

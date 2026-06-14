@@ -377,6 +377,10 @@ export const auditLogs = pgTable("audit_logs", {
 export const appSettings = pgTable("app_settings", {
   id: uuid("id").primaryKey().defaultRandom(),
   appSlug: text("app_slug").notNull().unique(),
+  appMode: text("app_mode")
+    .$type<"SINGLE" | "MULTI">()
+    .notNull()
+    .default("SINGLE"),
   theme: jsonb("theme").notNull().default({}),
   featureFlags: jsonb("feature_flags").notNull().default({}),
   singleModeUniverseId: uuid("single_mode_universe_id").references(
