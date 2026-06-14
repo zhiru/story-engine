@@ -41,6 +41,7 @@ export function makeOpenAiProvider(opts: OpenAiProviderOpts): AiProvider {
             model: opts.model,
             temperature: 0.85,
             max_tokens: 1800,
+            stream: false, // queremos a resposta completa, não SSE
             messages: [
               { role: "system", content: SYSTEM },
               { role: "user", content: input.prompt },
@@ -51,16 +52,13 @@ export function makeOpenAiProvider(opts: OpenAiProviderOpts): AiProvider {
         clearTimeout(timeout);
       }
 
+      const raw = await res.text();
       if (!res.ok) {
-        const body = await res.text().catch(() => "");
-        throw new Error(`AI gateway ${res.status}: ${body.slice(0, 300)}`);
+        throw new Error(`AI gateway ${res.status}: ${raw.slice(0, 300)}`);
       }
 
-      const data = (await res.json()) as {
-        choices?: Array<{ message?: { content?: string } }>;
-        usage?: { prompt_tokens?: number; completion_tokens?: number };
-      };
-      const content = data.choices?.[0]?.message?.content ?? "";
+      // O gateway pode responder JSON normal OU stream SSE mesmo com stream:false.
+      const content = extractContent(raw);
       const parsed = parseStoryJson(content);
       if (!parsed) {
         throw new Error("Resposta da IA não pôde ser interpretada como JSON de história");
@@ -68,6 +66,35 @@ export function makeOpenAiProvider(opts: OpenAiProviderOpts): AiProvider {
       return parsed;
     },
   };
+}
+
+/** Extrai o texto da resposta, lidando com JSON normal OU stream SSE (`data: {chunk}`). */
+export function extractContent(raw: string): string {
+  if (raw.trimStart().startsWith("data:")) {
+    let acc = "";
+    for (const line of raw.split(/\r?\n/)) {
+      const l = line.trim();
+      if (!l.startsWith("data:")) continue;
+      const payload = l.slice(5).trim();
+      if (payload === "" || payload === "[DONE]") continue;
+      try {
+        const obj = JSON.parse(payload) as {
+          choices?: Array<{ delta?: { content?: string }; message?: { content?: string } }>;
+        };
+        const ch = obj.choices?.[0];
+        acc += ch?.delta?.content ?? ch?.message?.content ?? "";
+      } catch {
+        // chunk malformado — ignora
+      }
+    }
+    return acc;
+  }
+  try {
+    const obj = JSON.parse(raw) as { choices?: Array<{ message?: { content?: string } }> };
+    return obj.choices?.[0]?.message?.content ?? "";
+  } catch {
+    return raw;
+  }
 }
 
 /** Tolerante: remove cercas ```json e isola o primeiro objeto {...}. */
