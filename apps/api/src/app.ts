@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import cors from "@fastify/cors";
 import { sql } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { authRoutes } from "./routes/auth.js";
@@ -10,6 +11,9 @@ import { generateRoutes } from "./routes/generate.js";
 
 export function buildApp() {
   const app = Fastify({ logger: false });
+
+  // CORS: dev permite o app web (Expo :8081) chamar a API (:3000).
+  app.register(cors, { origin: true });
 
   app.get("/health", async () => {
     await db.execute(sql`select 1`); // prova conectividade real com o Postgres
