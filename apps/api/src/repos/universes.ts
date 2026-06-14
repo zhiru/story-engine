@@ -6,7 +6,11 @@ type Actor = { id: string; role: "USER" | "MODERATOR" | "ADMIN" };
 
 export async function createUniverse(
   actor: Actor,
-  input: { title: string; description: string },
+  input: {
+    title: string;
+    description: string;
+    visibility?: "PUBLIC" | "PRIVATE" | "PAID";
+  },
 ) {
   const [row] = await db
     .insert(universes)
