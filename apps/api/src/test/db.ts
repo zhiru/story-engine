@@ -26,5 +26,6 @@ export async function seedUser(input: SeedUserInput) {
       role: input.role ?? "USER",
     })
     .returning();
+  if (!row) throw new Error("seedUser: insert returned no row");
   return row;
 }
