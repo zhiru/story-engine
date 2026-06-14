@@ -264,19 +264,21 @@ export async function generateStory(
     story_body: string;
     internal_summary_for_next_chapters: string;
   } | null = null;
+  let usedProvider = "stub";
 
-  for (const { impl } of providers) {
+  for (const { row, impl } of providers) {
     let lastErr: unknown;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         generatedOutput = await impl.generate(generateInput);
+        usedProvider = row.provider;
         break;
       } catch (err) {
         lastErr = err;
       }
     }
     if (generatedOutput) break;
-    console.error("Provider failed:", lastErr);
+    console.error(`Provider '${row.provider}' failed:`, lastErr);
   }
 
   if (!generatedOutput) {
@@ -295,9 +297,10 @@ export async function generateStory(
       seed: seed + "-retry",
       userGuidance: "CONTEÚDO 100% SEGURO PARA CRIANÇAS. " + (generateInput.userGuidance ?? ""),
     };
-    for (const { impl } of providers) {
+    for (const { row, impl } of providers) {
       try {
         generatedOutput = await impl.generate(reinforcedInput);
+        usedProvider = row.provider;
         break;
       } catch {
         // continue
@@ -317,7 +320,7 @@ export async function generateStory(
 
   // Step 9: Persist (APPROVED)
   const characterNames = universeChars.map((c) => c.name);
-  const generationCost = { provider: "stub", tokens: 0, cost_usd: 0 };
+  const generationCost = { provider: usedProvider, tokens: 0, cost_usd: 0 };
 
   const [newStory] = await db
     .insert(stories)

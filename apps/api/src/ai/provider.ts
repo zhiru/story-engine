@@ -7,6 +7,8 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { aiProviders, promptTemplates } from "../db/schema.js";
 import { stubProvider } from "./stubProvider.js";
+import { makeOpenAiProvider } from "./openaiProvider.js";
+import { env } from "../env.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -45,6 +47,15 @@ export interface AiProviderRow {
 function resolveProvider(row: AiProviderRow): AiProvider {
   if (row.provider === "stub") {
     return stubProvider;
+  }
+  // Gateways/Provedores compatíveis com OpenAI (ex.: OmniRoute -> Claude, OpenAI).
+  // Chave SEMPRE do env; se ausente, o generate() lança e o pipeline cai no fallback.
+  if (row.provider === "openai" || row.provider === "omniroute") {
+    return makeOpenAiProvider({
+      baseUrl: env.aiBaseUrl,
+      apiKey: env.aiApiKey,
+      model: row.model || env.aiModel,
+    });
   }
   throw new Error(
     `AI provider '${row.provider}' is not implemented. Add an adapter to register it.`,

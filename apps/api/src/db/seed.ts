@@ -30,6 +30,7 @@ const APP_SETTINGS_ID = "00000000-0000-0000-0000-000000000050";
 const PLAN_ID = "00000000-0000-0000-0000-000000000060";
 const SUBSCRIPTION_ID = "00000000-0000-0000-0000-000000000070";
 const AI_PROVIDER_ID = "00000000-0000-0000-0000-000000000080";
+const OMNIROUTE_PROVIDER_ID = "00000000-0000-0000-0000-000000000081";
 const PROMPT_TEMPLATE_ID = "00000000-0000-0000-0000-000000000090";
 
 async function main() {
@@ -185,7 +186,30 @@ Gigi aprendeu que compartilhar faz as coisas ficarem maiores por dentro — mesm
       .where(eq(appSettings.appSlug, "historias-da-gigi"));
   }
 
-  // ── AI Provider (stub, offline) ────────────────────────────────────────────
+  // ── AI Providers ───────────────────────────────────────────────────────────
+  // Primário: gateway compatível com OpenAI (OmniRoute -> Claude). A chave vem do
+  // env (AI_API_KEY); sem ela, o pipeline cai no stub. Modelo configurável (ADR-04).
+  await db
+    .insert(aiProviders)
+    .values({
+      id: OMNIROUTE_PROVIDER_ID,
+      provider: "omniroute",
+      model: process.env.AI_MODEL || "claude/claude-sonnet-4-6",
+      params: {},
+      fallbackOrder: 0,
+      isActive: true,
+    })
+    .onConflictDoUpdate({
+      target: aiProviders.id,
+      set: {
+        provider: "omniroute",
+        model: process.env.AI_MODEL || "claude/claude-sonnet-4-6",
+        fallbackOrder: 0,
+        isActive: true,
+      },
+    });
+
+  // Fallback offline determinístico (sempre disponível, sem rede).
   await db
     .insert(aiProviders)
     .values({
@@ -193,10 +217,13 @@ Gigi aprendeu que compartilhar faz as coisas ficarem maiores por dentro — mesm
       provider: "stub",
       model: "stub-kids-v1",
       params: {},
-      fallbackOrder: 0,
+      fallbackOrder: 1,
       isActive: true,
     })
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: aiProviders.id,
+      set: { fallbackOrder: 1, isActive: true },
+    });
 
   // ── Prompt template ────────────────────────────────────────────────────────
   const PROMPT_TEMPLATE = `Você é um contador de histórias infantis em português brasileiro.
