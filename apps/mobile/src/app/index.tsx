@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../auth/AuthContext';
-import { getConfig, listStories } from '../lib/api';
+import { getConfig, listStories, generateStory, ApiError } from '../lib/api';
 import type { StoryListItem } from '@storygen/shared';
 
 export default function HomeScreen() {
@@ -19,9 +19,12 @@ export default function HomeScreen() {
   const { accessToken } = useAuth();
 
   const [stories, setStories] = useState<StoryListItem[]>([]);
+  const [universeId, setUniverseId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [generateMessage, setGenerateMessage] = useState<string | null>(null);
 
   const loadStories = useCallback(async () => {
     if (!accessToken) return;
@@ -32,6 +35,7 @@ export default function HomeScreen() {
         setError('Universo não configurado.');
         return;
       }
+      setUniverseId(config.singleModeUniverseId);
       const list = await listStories(config.singleModeUniverseId, accessToken);
       setStories(list);
     } catch (e: unknown) {
@@ -48,6 +52,35 @@ export default function HomeScreen() {
     setRefreshing(true);
     await loadStories();
     setRefreshing(false);
+  }
+
+  async function handleGenerate() {
+    if (!accessToken || !universeId || generating) return;
+    setGenerating(true);
+    setGenerateMessage(null);
+
+    try {
+      const result = await generateStory({ universe_id: universeId }, accessToken);
+      // Refresh story list then navigate to the new story
+      await loadStories();
+      router.push(`/story/${result.id}`);
+    } catch (e: unknown) {
+      if (e instanceof ApiError) {
+        if (e.status === 402) {
+          setGenerateMessage('Voce atingiu o limite de historias do seu plano este mes.');
+        } else if (e.status === 422) {
+          setGenerateMessage('Nao foi possivel gerar a historia. Tente ajustar a orientacao.');
+        } else if (e.status === 403) {
+          setGenerateMessage('Voce precisa de uma assinatura ativa para gerar historias.');
+        } else {
+          setGenerateMessage('Erro ao gerar historia. Tente novamente.');
+        }
+      } else {
+        setGenerateMessage('Erro ao gerar historia. Tente novamente.');
+      }
+    } finally {
+      setGenerating(false);
+    }
   }
 
   if (loading) {
@@ -71,11 +104,34 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.heading}>Histórias da Gigi</Text>
+      <Text style={styles.heading}>Historias da Gigi</Text>
+
+      {/* Generate button */}
+      <TouchableOpacity
+        style={[styles.generateButton, generating && styles.generateButtonDisabled]}
+        onPress={() => void handleGenerate()}
+        disabled={generating || !universeId}
+        accessible
+        accessibilityRole="button"
+        accessibilityLabel="Gerar nova historia"
+      >
+        {generating ? (
+          <View style={styles.generateButtonInner}>
+            <ActivityIndicator size="small" color="#ffffff" />
+            <Text style={styles.generateButtonText}>Gerando historia...</Text>
+          </View>
+        ) : (
+          <Text style={styles.generateButtonText}>Gerar nova historia</Text>
+        )}
+      </TouchableOpacity>
+
+      {generateMessage ? (
+        <Text style={styles.generateMessageText}>{generateMessage}</Text>
+      ) : null}
 
       {stories.length === 0 ? (
-        <View style={styles.center}>
-          <Text style={styles.emptyText}>Nenhuma história disponível ainda.</Text>
+        <View style={styles.centerFlex}>
+          <Text style={styles.emptyText}>Nenhuma historia disponivel ainda.</Text>
         </View>
       ) : (
         <FlatList
@@ -95,7 +151,7 @@ export default function HomeScreen() {
               onPress={() => router.push(`/story/${item.id}`)}
               accessible
               accessibilityRole="button"
-              accessibilityLabel={`Ler história: ${item.title}`}
+              accessibilityLabel={`Ler historia: ${item.title}`}
             >
               <Text style={styles.cardTitle}>{item.title}</Text>
               <Text style={styles.cardDate}>
@@ -126,12 +182,47 @@ const styles = StyleSheet.create({
     backgroundColor: '#FAF5FF',
     padding: 24,
   },
+  centerFlex: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
   heading: {
     fontSize: 28,
     fontWeight: 'bold',
     color: '#1E1B4B',
     paddingHorizontal: 20,
-    paddingBottom: 16,
+    paddingBottom: 12,
+  },
+  generateButton: {
+    backgroundColor: '#7C3AED',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    alignItems: 'center',
+  },
+  generateButtonDisabled: {
+    backgroundColor: '#A78BFA',
+  },
+  generateButtonInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  generateButtonText: {
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 16,
+  },
+  generateMessageText: {
+    color: '#DC2626',
+    fontSize: 14,
+    textAlign: 'center',
+    marginHorizontal: 16,
+    marginBottom: 8,
   },
   list: {
     paddingHorizontal: 16,

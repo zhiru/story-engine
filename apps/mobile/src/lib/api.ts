@@ -9,6 +9,7 @@ import {
   type AppConfig,
   type StoryListItem,
   type Story,
+  type GenerateStoryInput,
 } from "@storygen/shared";
 
 const apiUrl = (Constants.expoConfig?.extra?.apiUrl as string) ?? "http://127.0.0.1:3000";
@@ -16,6 +17,17 @@ const apiUrl = (Constants.expoConfig?.extra?.apiUrl as string) ?? "http://127.0.
 export async function getHealth(): Promise<HealthResponse> {
   const res = await fetch(`${apiUrl}/health`);
   return HealthResponseSchema.parse(await res.json());
+}
+
+export class ApiError extends Error {
+  constructor(
+    public code: string,
+    message: string,
+    public status: number,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
 }
 
 async function post<T>(
@@ -31,8 +43,21 @@ async function post<T>(
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const err = (await res.json()) as { error?: string };
-    throw new Error(err.error ?? `HTTP ${res.status}`);
+    const payload = (await res.json()) as
+      | { error?: { code?: string; message?: string } | string }
+      | undefined;
+    if (payload && typeof payload.error === "object" && payload.error !== null) {
+      throw new ApiError(
+        payload.error.code ?? "UNKNOWN",
+        payload.error.message ?? `HTTP ${res.status}`,
+        res.status,
+      );
+    }
+    const msg =
+      payload && typeof payload.error === "string"
+        ? payload.error
+        : `HTTP ${res.status}`;
+    throw new ApiError("UNKNOWN", msg, res.status);
   }
   return res.json() as Promise<T>;
 }
@@ -80,4 +105,19 @@ export async function listStories(
 
 export async function getStory(id: string, accessToken: string): Promise<Story> {
   return get<Story>(`/stories/${id}`, accessToken);
+}
+
+export interface GenerateStoryResult {
+  id: string;
+  title: string;
+  content: string;
+  story_arc_id: string | null;
+  metadata_weather: { condition: string; temperature: number; currentTime: string };
+}
+
+export async function generateStory(
+  input: GenerateStoryInput,
+  accessToken: string,
+): Promise<GenerateStoryResult> {
+  return post<GenerateStoryResult>("/stories/generate", input, accessToken);
 }
