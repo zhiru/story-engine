@@ -13,6 +13,9 @@ import {
   appSettings,
   plans,
   subscriptions,
+  aiProviders,
+  promptTemplates,
+  consentRecords,
 } from "./schema.js";
 import { hashPassword } from "../auth/hash.js";
 
@@ -26,6 +29,8 @@ const STORY_ID = "00000000-0000-0000-0000-000000000040";
 const APP_SETTINGS_ID = "00000000-0000-0000-0000-000000000050";
 const PLAN_ID = "00000000-0000-0000-0000-000000000060";
 const SUBSCRIPTION_ID = "00000000-0000-0000-0000-000000000070";
+const AI_PROVIDER_ID = "00000000-0000-0000-0000-000000000080";
+const PROMPT_TEMPLATE_ID = "00000000-0000-0000-0000-000000000090";
 
 async function main() {
   console.log("🌱  Seeding SINGLE-mode data…");
@@ -180,11 +185,101 @@ Gigi aprendeu que compartilhar faz as coisas ficarem maiores por dentro — mesm
       .where(eq(appSettings.appSlug, "historias-da-gigi"));
   }
 
+  // ── AI Provider (stub, offline) ────────────────────────────────────────────
+  await db
+    .insert(aiProviders)
+    .values({
+      id: AI_PROVIDER_ID,
+      provider: "stub",
+      model: "stub-kids-v1",
+      params: {},
+      fallbackOrder: 0,
+      isActive: true,
+    })
+    .onConflictDoNothing();
+
+  // ── Prompt template ────────────────────────────────────────────────────────
+  const PROMPT_TEMPLATE = `Você é um contador de histórias infantis em português brasileiro.
+Crie uma história infantil educativa e segura para crianças com base nas informações abaixo.
+
+UNIVERSO: {{universe_title}}
+DESCRIÇÃO DO UNIVERSO: {{universe_description}}
+PERSONAGENS: {{characters}}
+TEMA: {{theme_title}}
+DESCRIÇÃO DO TEMA: {{theme_description}}
+TIPO DE NARRATIVA: {{narrative_type}}
+CLIMA ATUAL: {{weather_condition}}, {{weather_temperature}}°C
+HORÁRIO: {{current_time}}
+{{#previous_summary}}RESUMO DO CAPÍTULO ANTERIOR: {{previous_summary}}{{/previous_summary}}
+{{#user_guidance}}ORIENTAÇÃO ADICIONAL: {{user_guidance}}{{/user_guidance}}
+SEMENTE DE VARIAÇÃO: {{seed}}
+
+REGRAS OBRIGATÓRIAS DE SEGURANÇA:
+- Conteúdo 100% seguro para crianças de 4 a 12 anos
+- Sem violência, medo excessivo, conteúdo adulto ou linguagem inadequada
+- Mensagem positiva e educativa
+- O personagem PRINCIPAL deve liderar a resolução do problema
+- Integre o clima e o horário de forma natural na narrativa
+- 4 a 6 parágrafos bem desenvolvidos
+- Se CONTINUOUS, termine com um gancho para o próximo capítulo
+
+Responda EXATAMENTE neste formato JSON (sem markdown, sem texto fora do JSON):
+{"title":"<título curto e criativo>","story_body":"<história completa com parágrafos separados por \\n\\n>","internal_summary_for_next_chapters":"<3 linhas factuais sobre o que aconteceu neste capítulo>"}`;
+
+  await db
+    .insert(promptTemplates)
+    .values({
+      id: PROMPT_TEMPLATE_ID,
+      aiProviderId: AI_PROVIDER_ID,
+      name: "kids-story-v1",
+      version: 1,
+      template: PROMPT_TEMPLATE,
+      variables: [
+        "universe_title",
+        "universe_description",
+        "characters",
+        "theme_title",
+        "theme_description",
+        "narrative_type",
+        "weather_condition",
+        "weather_temperature",
+        "current_time",
+        "previous_summary",
+        "user_guidance",
+        "seed",
+      ],
+      isActive: true,
+      createdBy: ADMIN_ID,
+    })
+    .onConflictDoNothing();
+
+  // ── Admin consent (PARENTAL_DATA v1.0) ────────────────────────────────────
+  // Check if consent already exists to stay idempotent
+  const existingConsent = await db
+    .select()
+    .from(consentRecords)
+    .where(
+      eq(consentRecords.userId, ADMIN_ID),
+    )
+    .limit(1);
+
+  if (existingConsent.length === 0) {
+    await db.insert(consentRecords).values({
+      userId: ADMIN_ID,
+      consentType: "PARENTAL_DATA",
+      policyVersion: "1.0",
+      granted: true,
+      ipAddress: "127.0.0.1",
+    });
+  }
+
   console.log("✅  Seed complete.");
-  console.log(`   admin user  : ${ADMIN_ID}`);
-  console.log(`   universe    : ${UNIVERSE_ID}`);
-  console.log(`   story       : ${STORY_ID}`);
-  console.log(`   app_settings: historias-da-gigi`);
+  console.log(`   admin user      : ${ADMIN_ID}`);
+  console.log(`   universe        : ${UNIVERSE_ID}`);
+  console.log(`   story           : ${STORY_ID}`);
+  console.log(`   ai_provider     : ${AI_PROVIDER_ID} (stub)`);
+  console.log(`   prompt_template : ${PROMPT_TEMPLATE_ID}`);
+  console.log(`   app_settings    : historias-da-gigi`);
 
   process.exit(0);
 }
