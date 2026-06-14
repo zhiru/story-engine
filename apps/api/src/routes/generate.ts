@@ -26,7 +26,10 @@ export async function generateRoutes(app: FastifyInstance): Promise<void> {
       }
 
       try {
-        const result = await generateStory(request.actor, parsed.data);
+        const result = await generateStory(request.actor, parsed.data, {
+          appMode: request.appMode,
+          singleModeUniverseId: request.singleModeUniverseId,
+        });
         return reply.code(201).send(result);
       } catch (err) {
         if (err instanceof GenerationError) {
@@ -35,6 +38,7 @@ export async function generateRoutes(app: FastifyInstance): Promise<void> {
             QUOTA_EXCEEDED: 402,
             CONTENT_REJECTED: 422,
             GENERATION_FAILED: 503,
+            UNIVERSE_ACCESS_DENIED: 403,
           };
           const status = statusMap[err.code] ?? 500;
           return reply.code(status).send({

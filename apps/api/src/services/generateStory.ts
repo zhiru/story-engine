@@ -33,6 +33,7 @@ import { sanitizeGuidance, containsBlocked } from "../ai/sanitize.js";
 import { assemblePrompt } from "../ai/prompt.js";
 import { moderateOutput } from "../ai/moderation.js";
 import type { Actor } from "../auth/middleware.js";
+import type { AppMode } from "../auth/appContext.js";
 import type { GenerateStoryInput } from "@storygen/shared";
 
 // ── Error types ───────────────────────────────────────────────────────────────
@@ -43,7 +44,8 @@ export class GenerationError extends Error {
       | "NO_ACTIVE_SUBSCRIPTION"
       | "QUOTA_EXCEEDED"
       | "CONTENT_REJECTED"
-      | "GENERATION_FAILED",
+      | "GENERATION_FAILED"
+      | "UNIVERSE_ACCESS_DENIED",
     message: string,
   ) {
     super(message);
@@ -109,9 +111,15 @@ export interface GenerateStoryResult {
   metadata_weather: { condition: string; temperature: number; currentTime: string };
 }
 
+export interface GenerateStoryContext {
+  appMode: AppMode;
+  singleModeUniverseId: string | null;
+}
+
 export async function generateStory(
   actor: Actor,
   input: GenerateStoryInput,
+  ctx: GenerateStoryContext = { appMode: "SINGLE", singleModeUniverseId: null },
 ): Promise<GenerateStoryResult> {
   // Step 1: Active subscription check
   const plan = await getActiveSubscriptionPlan(actor.id);
@@ -152,6 +160,22 @@ export async function generateStory(
     .limit(1);
   if (!universe) {
     throw new GenerationError("GENERATION_FAILED", "Universo não encontrado.");
+  }
+
+  // Universe access check: allow if actor owns it, is admin/mod, or it's the
+  // single_mode_universe_id for this app slug.
+  const isPrivileged =
+    actor.role === "ADMIN" || actor.role === "MODERATOR";
+  const ownedByActor = universe.userId === actor.id;
+  const isSingleModeUniverse =
+    ctx.singleModeUniverseId !== null &&
+    universe.id === ctx.singleModeUniverseId;
+
+  if (!isPrivileged && !ownedByActor && !isSingleModeUniverse) {
+    throw new GenerationError(
+      "UNIVERSE_ACCESS_DENIED",
+      "Acesso negado: você não tem permissão para gerar histórias neste universo.",
+    );
   }
 
   const universeChars = await db
