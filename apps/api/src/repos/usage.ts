@@ -1,8 +1,8 @@
-import { and, count, eq, isNull } from "drizzle-orm";
+import { and, count, eq, isNull, sum } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { universes, usageRecords } from "../db/schema.js";
 
-function currentPeriod(): string {
+export function currentPeriod(): string {
   const now = new Date();
   const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
   return `${now.getUTCFullYear()}-${mm}`;
@@ -17,6 +17,27 @@ export async function countUserUniverses(userId: string): Promise<number> {
     .from(universes)
     .where(and(eq(universes.userId, userId), isNull(universes.deletedAt)));
   return row?.count ?? 0;
+}
+
+/**
+ * Count total quantity of a metric for a user in the current calendar month.
+ */
+export async function countThisMonth(
+  userId: string,
+  metric: "STORY_GENERATED" | "UNIVERSE_CREATED",
+): Promise<number> {
+  const period = currentPeriod();
+  const [row] = await db
+    .select({ total: sum(usageRecords.quantity) })
+    .from(usageRecords)
+    .where(
+      and(
+        eq(usageRecords.userId, userId),
+        eq(usageRecords.metric, metric),
+        eq(usageRecords.period, period),
+      ),
+    );
+  return Number(row?.total ?? 0);
 }
 
 /**

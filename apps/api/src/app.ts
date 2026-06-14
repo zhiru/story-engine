@@ -6,6 +6,7 @@ import { childProfileRoutes } from "./routes/childProfiles.js";
 import { configRoutes } from "./routes/config.js";
 import { storyRoutes } from "./routes/stories.js";
 import { creativeRoutes } from "./routes/creative.js";
+import { generateRoutes } from "./routes/generate.js";
 
 export function buildApp() {
   const app = Fastify({ logger: false });
@@ -21,6 +22,7 @@ export function buildApp() {
   app.register(configRoutes, { prefix: "/api/v1" });
   app.register(storyRoutes, { prefix: "/api/v1" });
   app.register(creativeRoutes, { prefix: "/api/v1" });
+  app.register(generateRoutes, { prefix: "/api/v1" });
 
   return app;
 }
