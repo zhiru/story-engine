@@ -144,3 +144,7 @@ vite.config.ts.timestamp-*
 
 # Expo
 apps/mobile/.expo/
+
+# Deploy web bundles
+deploy/dist-single/
+deploy/dist-multi/
