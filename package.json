@@ -12,8 +12,9 @@
     "db:down": "docker compose down",
     "db:generate": "pnpm --filter \"./apps/api\" run db:generate",
     "db:migrate": "pnpm --filter \"./apps/api\" run db:migrate",
+    "db:seed": "pnpm --filter \"./apps/api\" run db:seed",
     "test:api": "pnpm --filter \"./apps/api\" test",
-    "ci:local": "pnpm typecheck && pnpm lint && pnpm test:shared && pnpm db:up && pnpm db:migrate && pnpm test:api"
+    "ci:local": "pnpm typecheck && pnpm lint && pnpm test:shared && pnpm db:up && pnpm db:migrate && pnpm db:seed && pnpm test:api"
   },
   "devDependencies": {
     "@eslint/js": "^9",
