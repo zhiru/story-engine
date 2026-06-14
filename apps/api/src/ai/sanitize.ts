@@ -8,6 +8,8 @@ const BLOCKED_TERMS = [
   // violence
   "matar",
   "morte",
+  "morreu",
+  "morrer",
   "assassinar",
   "assassinato",
   "sangue",
