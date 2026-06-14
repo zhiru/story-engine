@@ -1,118 +1,183 @@
-import { GenerateStoryInputSchema } from '@storygen/shared';
-import * as Device from 'expo-device';
-import { useEffect, useState } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { getHealth } from '../lib/api';
-
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
+import { useEffect, useState, useCallback } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  Text,
+  TouchableOpacity,
+  View,
+  StyleSheet,
+  RefreshControl,
+} from 'react-native';
+import { useRouter } from 'expo-router';
+import { useAuth } from '../auth/AuthContext';
+import { getConfig, listStories } from '../lib/api';
+import type { StoryListItem } from '@storygen/shared';
 
 export default function HomeScreen() {
-  const sharedOk = GenerateStoryInputSchema.safeParse({
-    universe_id: '11111111-1111-1111-1111-111111111111',
-  }).success;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const router = useRouter() as any;
+  const { accessToken } = useAuth();
 
-  const [apiStatus, setApiStatus] = useState('...');
+  const [stories, setStories] = useState<StoryListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadStories = useCallback(async () => {
+    if (!accessToken) return;
+    try {
+      setError(null);
+      const config = await getConfig(accessToken);
+      if (!config.singleModeUniverseId) {
+        setError('Universo não configurado.');
+        return;
+      }
+      const list = await listStories(config.singleModeUniverseId, accessToken);
+      setStories(list);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Erro ao carregar histórias.');
+    }
+  }, [accessToken]);
+
   useEffect(() => {
-    getHealth()
-      .then((h) => setApiStatus(`${h.status}/${h.db}`))
-      .catch((e: Error) => setApiStatus(`erro: ${e.message}`));
-  }, []);
+    setLoading(true);
+    void loadStories().finally(() => setLoading(false));
+  }, [loadStories]);
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    await loadStories();
+    setRefreshing(false);
+  }
+
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#7C3AED" />
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={() => void loadStories()}>
+          <Text style={styles.retryText}>Tentar novamente</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
+    <View style={styles.container}>
+      <Text style={styles.heading}>Histórias da Gigi</Text>
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
-
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
-
-        <View className="flex-1 items-center justify-center bg-violet-100">
-          <Text className="text-violet-900 text-xl font-bold">StoryGen</Text>
+      {stories.length === 0 ? (
+        <View style={styles.center}>
+          <Text style={styles.emptyText}>Nenhuma história disponível ainda.</Text>
         </View>
-        <Text>{`shared import: ${sharedOk ? 'OK' : 'FAIL'}`}</Text>
-        <Text>{`api health: ${apiStatus}`}</Text>
-
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+      ) : (
+        <FlatList
+          data={stories}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.list}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => void handleRefresh()}
+              tintColor="#7C3AED"
+            />
+          }
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={styles.card}
+              onPress={() => router.push(`/story/${item.id}`)}
+              accessible
+              accessibilityRole="button"
+              accessibilityLabel={`Ler história: ${item.title}`}
+            >
+              <Text style={styles.cardTitle}>{item.title}</Text>
+              <Text style={styles.cardDate}>
+                {new Date(item.createdAt).toLocaleDateString('pt-BR', {
+                  day: 'numeric',
+                  month: 'long',
+                  year: 'numeric',
+                })}
+              </Text>
+            </TouchableOpacity>
+          )}
+        />
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
+    backgroundColor: '#FAF5FF',
+    paddingTop: 56,
   },
-  safeArea: {
+  center: {
     flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
-  },
-  heroSection: {
     alignItems: 'center',
     justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
+    backgroundColor: '#FAF5FF',
+    padding: 24,
   },
-  title: {
+  heading: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#1E1B4B',
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+  },
+  list: {
+    paddingHorizontal: 16,
+    paddingBottom: 32,
+    gap: 12,
+  },
+  card: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: '#7C3AED',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1E1B4B',
+    marginBottom: 6,
+  },
+  cardDate: {
+    fontSize: 13,
+    color: '#6B7280',
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#6B7280',
     textAlign: 'center',
   },
-  code: {
-    textTransform: 'uppercase',
+  errorText: {
+    fontSize: 16,
+    color: '#DC2626',
+    textAlign: 'center',
+    marginBottom: 16,
   },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+  retryButton: {
+    backgroundColor: '#7C3AED',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+  },
+  retryText: {
+    color: '#ffffff',
+    fontWeight: '600',
+    fontSize: 15,
   },
 });
