@@ -78,7 +78,10 @@ describe("GET /api/v1/config", () => {
     const res = await app.inject({
       method: "GET",
       url: "/api/v1/config",
-      headers: bearerHeader(admin.id, "ADMIN"),
+      headers: {
+        ...bearerHeader(admin.id, "ADMIN"),
+        "x-app-slug": "test-app",
+      },
     });
 
     expect(res.statusCode).toBe(200);

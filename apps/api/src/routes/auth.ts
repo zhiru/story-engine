@@ -14,6 +14,8 @@ import {
   sha256,
 } from "../repos/refreshTokens.js";
 import { recordConsent } from "../repos/consent.js";
+import { createTrialSubscription } from "../repos/subscriptions.js";
+import { TRIAL_PLAN_ID } from "../db/seedConstants.js";
 import { requireAuth } from "../auth/middleware.js";
 
 const REFRESH_TOKEN_TTL_DAYS = 7;
@@ -41,6 +43,16 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
     const passwordHash = await hashPassword(password);
     const user = await createUser({ name, email, passwordHash });
+
+    // Auto-assign TRIAL subscription so new users can generate immediately.
+    // The TRIAL plan is seeded via db:seed; if it doesn't exist yet (e.g., first
+    // run before seed), we skip gracefully.
+    try {
+      await createTrialSubscription(user.id, TRIAL_PLAN_ID);
+    } catch {
+      // Non-fatal: TRIAL plan not seeded yet, or constraint violation.
+      // User can still log in; subscription can be assigned separately.
+    }
 
     const accessToken = signAccess({ sub: user.id, role: user.role });
     const refreshToken = signRefresh({ sub: user.id });
