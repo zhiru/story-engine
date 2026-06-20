@@ -13,7 +13,11 @@ export async function configRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: [requireAuth] },
     async (request, reply) => {
       const slug = request.appSlug;
-      const settings = await getAppSettingsBySlug(slug);
+      // Resiliência: slug desconhecido cai no default em vez de quebrar a tela.
+      const fallbackSlug = process.env["DEFAULT_APP_SLUG"] ?? "historias-da-gigi";
+      const settings =
+        (await getAppSettingsBySlug(slug)) ??
+        (await getAppSettingsBySlug(fallbackSlug));
       if (!settings) {
         return reply.code(503).send({ error: "App not configured" });
       }

@@ -16,8 +16,16 @@ import {
   type CreateThemeInput,
 } from "@storygen/shared";
 
-const apiUrl = (Constants.expoConfig?.extra?.apiUrl as string) ?? "http://127.0.0.1:3000";
-const appSlug = (Constants.expoConfig?.extra?.appSlug as string) ?? "historias-da-gigi";
+// EXPO_PUBLIC_* são inlinados pelo Expo no bundle em build-time (garantido),
+// ao contrário de Constants.expoConfig.extra (que depende do app.config ver o env).
+const apiUrl =
+  (process.env.EXPO_PUBLIC_API_URL as string | undefined) ||
+  (Constants.expoConfig?.extra?.apiUrl as string) ||
+  "http://localhost:3000";
+const appSlug =
+  (process.env.EXPO_PUBLIC_APP_SLUG as string | undefined) ||
+  (Constants.expoConfig?.extra?.appSlug as string) ||
+  "historias-da-gigi";
 
 export async function getHealth(): Promise<HealthResponse> {
   const res = await fetch(`${apiUrl}/health`, {
