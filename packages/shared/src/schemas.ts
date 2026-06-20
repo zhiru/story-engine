@@ -97,3 +97,52 @@ export const CreateStoryArcInputSchema = z.object({
   summary: z.string().max(2000).optional(),
 });
 export type CreateStoryArcInput = z.infer<typeof CreateStoryArcInputSchema>;
+
+// ── Update DTOs ──────────────────────────────────────────────────────────────
+
+export const UpdateCharacterInputSchema = z.object({
+  name: z.string().min(1).max(255).optional(),
+  classification: z.enum(["PRINCIPAL", "SECUNDARIO", "ANTAGONISTA", "MASCOTE"]).optional(),
+  ageGroup: z.string().optional(),
+  traits: z.array(z.string()).optional(),
+  imageUrl: z.string().url().optional(),
+});
+export type UpdateCharacterInput = z.infer<typeof UpdateCharacterInputSchema>;
+
+export const UpdateThemeInputSchema = z.object({
+  title: z.string().min(1).max(255).optional(),
+  description: z.string().max(2000).optional(),
+});
+export type UpdateThemeInput = z.infer<typeof UpdateThemeInputSchema>;
+
+// ── Response schemas ─────────────────────────────────────────────────────────
+
+export const CharacterSchema = z.object({
+  id: z.string().uuid(),
+  universeId: z.string().uuid(),
+  name: z.string(),
+  classification: z.enum(["PRINCIPAL", "SECUNDARIO", "ANTAGONISTA", "MASCOTE"]),
+  ageGroup: z.string().nullable(),
+  traits: z.array(z.string()),
+  imageUrl: z.string().nullable(),
+  createdAt: z.coerce.date(),
+  updatedAt: z.coerce.date(),
+});
+export type Character = z.infer<typeof CharacterSchema>;
+
+export const ThemeSchema = z.object({
+  id: z.string().uuid(),
+  universeId: z.string().uuid(),
+  title: z.string(),
+  description: z.string().nullable(),
+  createdAt: z.coerce.date(),
+  updatedAt: z.coerce.date(),
+});
+export type Theme = z.infer<typeof ThemeSchema>;
+
+export const MeResponseSchema = z.object({
+  id: z.string().uuid(),
+  email: z.string().email(),
+  role: z.enum(["USER", "MODERATOR", "ADMIN"]),
+});
+export type MeResponse = z.infer<typeof MeResponseSchema>;

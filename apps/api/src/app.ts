@@ -8,6 +8,7 @@ import { configRoutes } from "./routes/config.js";
 import { storyRoutes } from "./routes/stories.js";
 import { creativeRoutes } from "./routes/creative.js";
 import { generateRoutes } from "./routes/generate.js";
+import { meRoutes } from "./routes/me.js";
 import { resolveAppContext } from "./auth/appContext.js";
 
 export function buildApp() {
@@ -31,6 +32,7 @@ export function buildApp() {
   app.register(storyRoutes, { prefix: "/api/v1" });
   app.register(creativeRoutes, { prefix: "/api/v1" });
   app.register(generateRoutes, { prefix: "/api/v1" });
+  app.register(meRoutes, { prefix: "/api/v1" });
 
   return app;
 }
