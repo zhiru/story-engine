@@ -18,6 +18,7 @@ import {
   ApiError,
 } from '../lib/api';
 import type { StoryListItem, UniverseListItem } from '@storygen/shared';
+import AppShell from '../components/AppShell';
 
 // ── SINGLE mode view ──────────────────────────────────────────────────────────
 function SingleModeView({
@@ -33,8 +34,6 @@ function SingleModeView({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [generating, setGenerating] = useState(false);
-  const [generateMessage, setGenerateMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -57,115 +56,82 @@ function SingleModeView({
     setRefreshing(false);
   }
 
-  async function handleGenerate() {
-    if (generating) return;
-    setGenerating(true);
-    setGenerateMessage(null);
-    try {
-      const result = await generateStory({ universe_id: universeId }, accessToken);
-      await load();
-      router.push(`/story/${result.id}`);
-    } catch (e: unknown) {
-      if (e instanceof ApiError) {
-        if (e.status === 402) {
-          setGenerateMessage('Voce atingiu o limite de historias do seu plano este mes.');
-        } else if (e.status === 422) {
-          setGenerateMessage('Nao foi possivel gerar a historia. Tente ajustar a orientacao.');
-        } else if (e.status === 403) {
-          setGenerateMessage('Voce precisa de uma assinatura ativa para gerar historias.');
-        } else {
-          setGenerateMessage('Erro ao gerar historia. Tente novamente.');
-        }
-      } else {
-        setGenerateMessage('Erro ao gerar historia. Tente novamente.');
-      }
-    } finally {
-      setGenerating(false);
-    }
-  }
-
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#7C3AED" />
-      </View>
+      <AppShell title="Histórias da Gigi">
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color="#7C3AED" />
+        </View>
+      </AppShell>
     );
   }
 
   if (error) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={() => void load()}>
-          <Text style={styles.retryText}>Tentar novamente</Text>
-        </TouchableOpacity>
-      </View>
+      <AppShell title="Histórias da Gigi">
+        <View style={styles.center}>
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => void load()}>
+            <Text style={styles.retryText}>Tentar novamente</Text>
+          </TouchableOpacity>
+        </View>
+      </AppShell>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.heading}>Historias da Gigi</Text>
+    <AppShell title="Histórias da Gigi">
+      <View style={styles.container}>
+        <Text style={styles.heading}>Histórias da Gigi</Text>
 
-      <TouchableOpacity
-        style={[styles.generateButton, generating && styles.generateButtonDisabled]}
-        onPress={() => void handleGenerate()}
-        disabled={generating}
-        accessible
-        accessibilityRole="button"
-        accessibilityLabel="Gerar nova historia"
-      >
-        {generating ? (
-          <View style={styles.generateButtonInner}>
-            <ActivityIndicator size="small" color="#ffffff" />
-            <Text style={styles.generateButtonText}>Gerando historia...</Text>
+        <TouchableOpacity
+          style={styles.generateButton}
+          onPress={() => router.push('/generate')}
+          accessible
+          accessibilityRole="button"
+          accessibilityLabel="Gerar nova história"
+        >
+          <Text style={styles.generateButtonText}>✨ Gerar nova história</Text>
+        </TouchableOpacity>
+
+        {stories.length === 0 ? (
+          <View style={styles.centerFlex}>
+            <Text style={styles.emptyText}>Nenhuma historia disponivel ainda.</Text>
           </View>
         ) : (
-          <Text style={styles.generateButtonText}>Gerar nova historia</Text>
+          <FlatList
+            data={stories}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.list}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={() => void handleRefresh()}
+                tintColor="#7C3AED"
+              />
+            }
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={styles.card}
+                onPress={() => router.push(`/story/${item.id}`)}
+                accessible
+                accessibilityRole="button"
+                accessibilityLabel={`Ler historia: ${item.title}`}
+              >
+                <Text style={styles.cardTitle}>{item.title}</Text>
+                <Text style={styles.cardDate}>
+                  {new Date(item.createdAt).toLocaleDateString('pt-BR', {
+                    day: 'numeric',
+                    month: 'long',
+                    year: 'numeric',
+                  })}
+                </Text>
+              </TouchableOpacity>
+            )}
+          />
         )}
-      </TouchableOpacity>
-
-      {generateMessage ? (
-        <Text style={styles.generateMessageText}>{generateMessage}</Text>
-      ) : null}
-
-      {stories.length === 0 ? (
-        <View style={styles.centerFlex}>
-          <Text style={styles.emptyText}>Nenhuma historia disponivel ainda.</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={stories}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.list}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => void handleRefresh()}
-              tintColor="#7C3AED"
-            />
-          }
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={styles.card}
-              onPress={() => router.push(`/story/${item.id}`)}
-              accessible
-              accessibilityRole="button"
-              accessibilityLabel={`Ler historia: ${item.title}`}
-            >
-              <Text style={styles.cardTitle}>{item.title}</Text>
-              <Text style={styles.cardDate}>
-                {new Date(item.createdAt).toLocaleDateString('pt-BR', {
-                  day: 'numeric',
-                  month: 'long',
-                  year: 'numeric',
-                })}
-              </Text>
-            </TouchableOpacity>
-          )}
-        />
-      )}
-    </View>
+      </View>
+    </AppShell>
   );
 }
 
@@ -236,90 +202,96 @@ function UniverseStoriesView({
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#7C3AED" />
-      </View>
+      <AppShell title={universe.title}>
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color="#7C3AED" />
+        </View>
+      </AppShell>
     );
   }
 
   if (error) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={() => void load()}>
-          <Text style={styles.retryText}>Tentar novamente</Text>
-        </TouchableOpacity>
-      </View>
+      <AppShell title={universe.title}>
+        <View style={styles.center}>
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => void load()}>
+            <Text style={styles.retryText}>Tentar novamente</Text>
+          </TouchableOpacity>
+        </View>
+      </AppShell>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <TouchableOpacity style={styles.backRow} onPress={onBack}>
-        <Text style={styles.backLink}>← Universos</Text>
-      </TouchableOpacity>
+    <AppShell title={universe.title}>
+      <View style={styles.container}>
+        <TouchableOpacity style={styles.backRow} onPress={onBack}>
+          <Text style={styles.backLink}>← Universos</Text>
+        </TouchableOpacity>
 
-      <Text style={styles.heading}>{universe.title}</Text>
+        <Text style={styles.heading}>{universe.title}</Text>
 
-      <TouchableOpacity
-        style={[styles.generateButton, generating && styles.generateButtonDisabled]}
-        onPress={() => void handleGenerate()}
-        disabled={generating}
-        accessible
-        accessibilityRole="button"
-        accessibilityLabel="Gerar nova historia"
-      >
-        {generating ? (
-          <View style={styles.generateButtonInner}>
-            <ActivityIndicator size="small" color="#ffffff" />
-            <Text style={styles.generateButtonText}>Gerando historia...</Text>
+        <TouchableOpacity
+          style={[styles.generateButton, generating && styles.generateButtonDisabled]}
+          onPress={() => void handleGenerate()}
+          disabled={generating}
+          accessible
+          accessibilityRole="button"
+          accessibilityLabel="Gerar nova historia"
+        >
+          {generating ? (
+            <View style={styles.generateButtonInner}>
+              <ActivityIndicator size="small" color="#ffffff" />
+              <Text style={styles.generateButtonText}>Gerando historia...</Text>
+            </View>
+          ) : (
+            <Text style={styles.generateButtonText}>Gerar nova historia</Text>
+          )}
+        </TouchableOpacity>
+
+        {generateMessage ? (
+          <Text style={styles.generateMessageText}>{generateMessage}</Text>
+        ) : null}
+
+        {stories.length === 0 ? (
+          <View style={styles.centerFlex}>
+            <Text style={styles.emptyText}>Nenhuma historia neste universo ainda.</Text>
           </View>
         ) : (
-          <Text style={styles.generateButtonText}>Gerar nova historia</Text>
+          <FlatList
+            data={stories}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.list}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={() => void handleRefresh()}
+                tintColor="#7C3AED"
+              />
+            }
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={styles.card}
+                onPress={() => router.push(`/story/${item.id}`)}
+                accessible
+                accessibilityRole="button"
+                accessibilityLabel={`Ler historia: ${item.title}`}
+              >
+                <Text style={styles.cardTitle}>{item.title}</Text>
+                <Text style={styles.cardDate}>
+                  {new Date(item.createdAt).toLocaleDateString('pt-BR', {
+                    day: 'numeric',
+                    month: 'long',
+                    year: 'numeric',
+                  })}
+                </Text>
+              </TouchableOpacity>
+            )}
+          />
         )}
-      </TouchableOpacity>
-
-      {generateMessage ? (
-        <Text style={styles.generateMessageText}>{generateMessage}</Text>
-      ) : null}
-
-      {stories.length === 0 ? (
-        <View style={styles.centerFlex}>
-          <Text style={styles.emptyText}>Nenhuma historia neste universo ainda.</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={stories}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.list}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => void handleRefresh()}
-              tintColor="#7C3AED"
-            />
-          }
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={styles.card}
-              onPress={() => router.push(`/story/${item.id}`)}
-              accessible
-              accessibilityRole="button"
-              accessibilityLabel={`Ler historia: ${item.title}`}
-            >
-              <Text style={styles.cardTitle}>{item.title}</Text>
-              <Text style={styles.cardDate}>
-                {new Date(item.createdAt).toLocaleDateString('pt-BR', {
-                  day: 'numeric',
-                  month: 'long',
-                  year: 'numeric',
-                })}
-              </Text>
-            </TouchableOpacity>
-          )}
-        />
-      )}
-    </View>
+      </View>
+    </AppShell>
   );
 }
 
@@ -374,70 +346,76 @@ function MultiModeView({ accessToken }: { accessToken: string }) {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#7C3AED" />
-      </View>
+      <AppShell title="Meus Universos">
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color="#7C3AED" />
+        </View>
+      </AppShell>
     );
   }
 
   if (error) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={() => void load()}>
-          <Text style={styles.retryText}>Tentar novamente</Text>
-        </TouchableOpacity>
-      </View>
+      <AppShell title="Meus Universos">
+        <View style={styles.center}>
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => void load()}>
+            <Text style={styles.retryText}>Tentar novamente</Text>
+          </TouchableOpacity>
+        </View>
+      </AppShell>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.heading}>Meus Universos</Text>
+    <AppShell title="Meus Universos">
+      <View style={styles.container}>
+        <Text style={styles.heading}>Meus Universos</Text>
 
-      <TouchableOpacity
-        style={styles.generateButton}
-        onPress={() => router.push('/create-universe')}
-        accessible
-        accessibilityRole="button"
-        accessibilityLabel="Criar universo"
-      >
-        <Text style={styles.generateButtonText}>+ Criar universo</Text>
-      </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.generateButton}
+          onPress={() => router.push('/create-universe')}
+          accessible
+          accessibilityRole="button"
+          accessibilityLabel="Criar universo"
+        >
+          <Text style={styles.generateButtonText}>+ Criar universo</Text>
+        </TouchableOpacity>
 
-      {universes.length === 0 ? (
-        <View style={styles.centerFlex}>
-          <Text style={styles.emptyText}>Voce ainda nao tem universos. Crie um acima!</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={universes}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.list}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => void handleRefresh()}
-              tintColor="#7C3AED"
-            />
-          }
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={styles.card}
-              onPress={() => setSelectedUniverse(item)}
-              accessible
-              accessibilityRole="button"
-              accessibilityLabel={`Abrir universo: ${item.title}`}
-            >
-              <Text style={styles.cardTitle}>{item.title}</Text>
-              {item.description ? (
-                <Text style={styles.cardDate} numberOfLines={2}>{item.description}</Text>
-              ) : null}
-            </TouchableOpacity>
-          )}
-        />
-      )}
-    </View>
+        {universes.length === 0 ? (
+          <View style={styles.centerFlex}>
+            <Text style={styles.emptyText}>Voce ainda nao tem universos. Crie um acima!</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={universes}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.list}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={() => void handleRefresh()}
+                tintColor="#7C3AED"
+              />
+            }
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={styles.card}
+                onPress={() => setSelectedUniverse(item)}
+                accessible
+                accessibilityRole="button"
+                accessibilityLabel={`Abrir universo: ${item.title}`}
+              >
+                <Text style={styles.cardTitle}>{item.title}</Text>
+                {item.description ? (
+                  <Text style={styles.cardDate} numberOfLines={2}>{item.description}</Text>
+                ) : null}
+              </TouchableOpacity>
+            )}
+          />
+        )}
+      </View>
+    </AppShell>
   );
 }
 

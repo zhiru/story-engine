@@ -14,6 +14,11 @@ import {
   type CreateUniverseInput,
   type CreateCharacterInput,
   type CreateThemeInput,
+  type UpdateCharacterInput,
+  type UpdateThemeInput,
+  type Character,
+  type Theme,
+  type MeResponse,
 } from "@storygen/shared";
 
 // EXPO_PUBLIC_* são inlinados pelo Expo no bundle em build-time (garantido),
@@ -107,10 +112,93 @@ async function get<T>(path: string, accessToken: string): Promise<T> {
     },
   });
   if (!res.ok) {
-    const err = (await res.json()) as { error?: string };
-    throw new Error(err.error ?? `HTTP ${res.status}`);
+    const payload = (await res.json()) as
+      | { error?: { code?: string; message?: string } | string }
+      | undefined;
+    if (payload && typeof payload.error === "object" && payload.error !== null) {
+      throw new ApiError(
+        payload.error.code ?? "UNKNOWN",
+        payload.error.message ?? `HTTP ${res.status}`,
+        res.status,
+      );
+    }
+    const msg =
+      payload && typeof payload.error === "string"
+        ? payload.error
+        : `HTTP ${res.status}`;
+    throw new ApiError("UNKNOWN", msg, res.status);
   }
   return res.json() as Promise<T>;
+}
+
+async function patch<T>(
+  path: string,
+  body: unknown,
+  accessToken: string,
+): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-App-Slug": appSlug,
+    Authorization: `Bearer ${accessToken}`,
+  };
+  const res = await fetch(`${apiUrl}/api/v1${path}`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const payload = (await res.json()) as
+      | { error?: { code?: string; message?: string } | string }
+      | undefined;
+    if (payload && typeof payload.error === "object" && payload.error !== null) {
+      throw new ApiError(
+        payload.error.code ?? "UNKNOWN",
+        payload.error.message ?? `HTTP ${res.status}`,
+        res.status,
+      );
+    }
+    const msg =
+      payload && typeof payload.error === "string"
+        ? payload.error
+        : `HTTP ${res.status}`;
+    throw new ApiError("UNKNOWN", msg, res.status);
+  }
+  return res.json() as Promise<T>;
+}
+
+async function del<T>(path: string, accessToken: string): Promise<T> {
+  const res = await fetch(`${apiUrl}/api/v1${path}`, {
+    method: "DELETE",
+    headers: {
+      "X-App-Slug": appSlug,
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+  if (!res.ok) {
+    const payload = (await res.json()) as
+      | { error?: { code?: string; message?: string } | string }
+      | undefined;
+    if (payload && typeof payload.error === "object" && payload.error !== null) {
+      throw new ApiError(
+        payload.error.code ?? "UNKNOWN",
+        payload.error.message ?? `HTTP ${res.status}`,
+        res.status,
+      );
+    }
+    const msg =
+      payload && typeof payload.error === "string"
+        ? payload.error
+        : `HTTP ${res.status}`;
+    throw new ApiError("UNKNOWN", msg, res.status);
+  }
+  // DELETE may return 204 No Content
+  const text = await res.text();
+  if (!text) return undefined as unknown as T;
+  return JSON.parse(text) as T;
+}
+
+export async function getMe(accessToken: string): Promise<MeResponse> {
+  return get<MeResponse>("/me", accessToken);
 }
 
 export async function getConfig(accessToken: string): Promise<AppConfig> {
@@ -141,6 +229,74 @@ export async function generateStory(
   accessToken: string,
 ): Promise<GenerateStoryResult> {
   return post<GenerateStoryResult>("/stories/generate", input, accessToken);
+}
+
+// ── Characters ─────────────────────────────────────────────────────────────
+
+export async function listCharacters(
+  universeId: string,
+  accessToken: string,
+): Promise<Character[]> {
+  return get<Character[]>(`/universes/${universeId}/characters`, accessToken);
+}
+
+export async function createCharacter(
+  universeId: string,
+  input: CreateCharacterInput,
+  accessToken: string,
+): Promise<Character> {
+  return post<Character>(`/universes/${universeId}/characters`, input, accessToken);
+}
+
+export async function updateCharacter(
+  universeId: string,
+  characterId: string,
+  input: UpdateCharacterInput,
+  accessToken: string,
+): Promise<Character> {
+  return patch<Character>(`/universes/${universeId}/characters/${characterId}`, input, accessToken);
+}
+
+export async function deleteCharacter(
+  universeId: string,
+  characterId: string,
+  accessToken: string,
+): Promise<void> {
+  await del<void>(`/universes/${universeId}/characters/${characterId}`, accessToken);
+}
+
+// ── Themes ─────────────────────────────────────────────────────────────────
+
+export async function listThemes(
+  universeId: string,
+  accessToken: string,
+): Promise<Theme[]> {
+  return get<Theme[]>(`/universes/${universeId}/themes`, accessToken);
+}
+
+export async function createTheme(
+  universeId: string,
+  input: CreateThemeInput,
+  accessToken: string,
+): Promise<Theme> {
+  return post<Theme>(`/universes/${universeId}/themes`, input, accessToken);
+}
+
+export async function updateTheme(
+  universeId: string,
+  themeId: string,
+  input: UpdateThemeInput,
+  accessToken: string,
+): Promise<Theme> {
+  return patch<Theme>(`/universes/${universeId}/themes/${themeId}`, input, accessToken);
+}
+
+export async function deleteTheme(
+  universeId: string,
+  themeId: string,
+  accessToken: string,
+): Promise<void> {
+  await del<void>(`/universes/${universeId}/themes/${themeId}`, accessToken);
 }
 
 // ── MULTI mode functions ──────────────────────────────────────────────────────

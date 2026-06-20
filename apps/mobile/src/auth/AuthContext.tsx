@@ -1,17 +1,21 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import { register, login, refresh, recordConsent } from '../lib/api';
+import { register, login, refresh, recordConsent, getMe } from '../lib/api';
 import type { RegisterInput, LoginInput, ConsentInput } from '@storygen/shared';
 
 const ACCESS_TOKEN_KEY = 'storygen_access_token';
 const REFRESH_TOKEN_KEY = 'storygen_refresh_token';
 const HAS_CONSENT_KEY = 'storygen_has_consent';
 
+type UserRole = 'USER' | 'MODERATOR' | 'ADMIN';
+
 type AuthState = {
   accessToken: string | null;
   refreshToken: string | null;
   hasConsent: boolean;
   isLoading: boolean;
+  role: UserRole | null;
+  email: string | null;
 };
 
 type AuthContextType = AuthState & {
@@ -42,12 +46,26 @@ async function clearTokens() {
   }
 }
 
+async function fetchAndApplyRole(
+  accessToken: string,
+  setState: React.Dispatch<React.SetStateAction<AuthState>>,
+): Promise<void> {
+  try {
+    const me = await getMe(accessToken);
+    setState((s) => ({ ...s, role: me.role, email: me.email }));
+  } catch {
+    // tolerate failure — role stays null
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AuthState>({
     accessToken: null,
     refreshToken: null,
     hasConsent: false,
     isLoading: true,
+    role: null,
+    email: null,
   });
 
   // Load persisted tokens on mount
@@ -64,12 +82,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           try {
             const tokens = await refresh(refreshToken);
             await saveTokens(tokens.access_token, tokens.refresh_token);
-            setState({
+            setState((s) => ({
+              ...s,
               accessToken: tokens.access_token,
               refreshToken: tokens.refresh_token,
               hasConsent,
               isLoading: false,
-            });
+            }));
+            void fetchAndApplyRole(tokens.access_token, setState);
             return;
           } catch {
             // Refresh failed — clear tokens and go to login
@@ -91,6 +111,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
     }));
+    void fetchAndApplyRole(tokens.access_token, setState);
   }, []);
 
   const registerFn = useCallback(async (input: RegisterInput) => {
@@ -101,6 +122,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
     }));
+    void fetchAndApplyRole(tokens.access_token, setState);
   }, []);
 
   const signOut = useCallback(async () => {
@@ -110,6 +132,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       refreshToken: null,
       hasConsent: false,
       isLoading: false,
+      role: null,
+      email: null,
     });
   }, []);
 
