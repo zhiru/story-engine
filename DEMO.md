@@ -28,24 +28,32 @@ App de histórias infantis geradas por IA (Claude via gateway OmniRoute). Dois m
 
 ```bash
 # (dentro do WSL, na raiz do projeto)
-# status
-docker compose -f docker-compose.demo.yml ps
-# subir / reiniciar (se algo cair ou após reboot)
+
+# 1) build dos dois web (PESADO, só na 1ª vez ou após mudar o app) — ~2-3 min, CPU alta
+bash scripts/build-demo-web.sh
+
+# 2) subir o stack (LEVE — usa imagem da API + web já buildados; idle ~0% CPU)
 docker compose -f docker-compose.demo.yml up -d
-# logs da API
+
+# status / logs / parar
+docker compose -f docker-compose.demo.yml ps
 docker compose -f docker-compose.demo.yml logs -f api
-# parar tudo
-docker compose -f docker-compose.demo.yml down
+docker compose -f docker-compose.demo.yml down      # libera recursos (mantém o volume do banco)
 ```
 
+> **Recursos:** o stack **parado custa ~0%**. O peso é o `build-demo-web.sh` (Metro empacotando 2 bundles) — roda uma vez. Depois disso, `up -d` é leve.
+
 Portas: web SINGLE `8080`, web MULTI `8082`, API `3000`, Postgres (interno ao compose).
+
+## IA (Claude) e fallback
+A geração usa o gateway **OmniRoute → Claude**. Se o gateway estiver fora (ex.: `502`), o app cai automaticamente num **gerador offline (stub)** — a história sai mais simples, mas o app **não quebra**. Quando o gateway volta, as próximas histórias saem do Claude de novo. (Comportamento por design — adapter de provedor, ADR-04.)
 
 ## Arquitetura (resumo)
 - **app** Expo Router (web) → **API Fastify** (`apps/api`) → **Postgres** (Drizzle ORM). O app nunca toca o banco direto.
 - Auth própria (argon2 + JWT), autorização na camada de aplicação (sem Supabase, sem RLS).
 - Modo (SINGLE/MULTI) resolvido por `app_slug` no banco (`app_settings`), não pelo build.
 - IA: adapter de provedor (ADR-04). Primário = **OmniRoute → Claude** (`cc/claude-haiku-4-5`); **stub offline** como fallback. Chave só em `apps/api/.env` (gitignored).
-- nginx serve o web estático e faz proxy `/api` → API (mesma origem) — resiliente ao forwarding do WSL.
+- nginx serve o web estático; o app chama a API em `localhost:3000` (publicada pelo Docker Desktop no host). nginx também expõe proxy `/api` como alternativa.
 
 ## Trocar o modelo do Claude
 Edita `apps/api/.env` → `AI_MODEL=cc/claude-sonnet-4-6` (prosa melhor, mais lento) e `docker compose -f docker-compose.demo.yml up -d --build api`.
