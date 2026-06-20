@@ -1,0 +1,57 @@
+# Produção (servidor Plesk): web preso em 127.0.0.1 (exposto só via proxy do Plesk),
+# API interna ao compose (sem porta no host). Postgres com volume próprio.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: storygen
+    volumes:
+      - prod_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d storygen"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file:
+      - apps/api/.env
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/storygen
+      PORT: "3000"
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web-single:
+    image: nginx:alpine
+    volumes:
+      - ./deploy/dist-single:/usr/share/nginx/html:ro
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+    ports:
+      - "127.0.0.1:18080:80"
+    restart: unless-stopped
+
+  web-multi:
+    image: nginx:alpine
+    volumes:
+      - ./deploy/dist-multi:/usr/share/nginx/html:ro
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+    ports:
+      - "127.0.0.1:18082:80"
+    restart: unless-stopped
+
+volumes:
+  prod_pgdata:
