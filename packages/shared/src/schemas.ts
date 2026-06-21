@@ -146,3 +146,97 @@ export const MeResponseSchema = z.object({
   role: z.enum(["USER", "MODERATOR", "ADMIN"]),
 });
 export type MeResponse = z.infer<typeof MeResponseSchema>;
+
+// ── Admin: Users ─────────────────────────────────────────────────────────────
+
+export const UpdateUserInputSchema = z.object({
+  role: z.enum(["USER", "MODERATOR", "ADMIN"]).optional(),
+  suspendedUntil: z.string().datetime({ offset: true }).nullable().optional(),
+});
+export type UpdateUserInput = z.infer<typeof UpdateUserInputSchema>;
+
+export const AdminUserSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  email: z.string().email(),
+  role: z.enum(["USER", "MODERATOR", "ADMIN"]),
+  suspendedUntil: z.coerce.date().nullable(),
+  createdAt: z.coerce.date(),
+});
+export type AdminUser = z.infer<typeof AdminUserSchema>;
+
+// ── Admin: Plans ─────────────────────────────────────────────────────────────
+
+export const CreatePlanInputSchema = z.object({
+  name: z.string().min(1).max(255),
+  maxUniverses: z.number().int().min(0),
+  maxStoriesPerMonth: z.number().int().min(0),
+  priceCents: z.number().int().min(0),
+  revenuecatEntitlement: z.string().optional(),
+});
+export type CreatePlanInput = z.infer<typeof CreatePlanInputSchema>;
+
+export const UpdatePlanInputSchema = z.object({
+  name: z.string().min(1).max(255).optional(),
+  maxUniverses: z.number().int().min(0).optional(),
+  maxStoriesPerMonth: z.number().int().min(0).optional(),
+  priceCents: z.number().int().min(0).optional(),
+  revenuecatEntitlement: z.string().nullable().optional(),
+  isActive: z.boolean().optional(),
+});
+export type UpdatePlanInput = z.infer<typeof UpdatePlanInputSchema>;
+
+// ── Admin: Reports ────────────────────────────────────────────────────────────
+
+export const CreateReportInputSchema = z.object({
+  targetType: z.enum(["UNIVERSE", "CHARACTER", "STORY"]),
+  targetId: z.string().uuid(),
+  reason: z.string().min(1).max(1000),
+  details: z.string().max(5000).optional(),
+});
+export type CreateReportInput = z.infer<typeof CreateReportInputSchema>;
+
+export const UpdateReportInputSchema = z.object({
+  status: z.enum(["OPEN", "REVIEWING", "ACTIONED", "DISMISSED"]),
+  resolvedBy: z.string().uuid().optional(),
+});
+export type UpdateReportInput = z.infer<typeof UpdateReportInputSchema>;
+
+// ── Admin: App Settings ───────────────────────────────────────────────────────
+
+export const UpdateAppSettingsInputSchema = z.object({
+  theme: z.record(z.unknown()).optional(),
+  featureFlags: z.record(z.unknown()).optional(),
+  appMode: z.enum(["SINGLE", "MULTI"]).optional(),
+  singleModeUniverseId: z.string().uuid().nullable().optional(),
+});
+export type UpdateAppSettingsInput = z.infer<typeof UpdateAppSettingsInputSchema>;
+
+// ── Admin: Prompt Templates ───────────────────────────────────────────────────
+
+export const CreatePromptTemplateInputSchema = z.object({
+  aiProviderId: z.string().uuid(),
+  name: z.string().min(1).max(255),
+  template: z.string().min(1),
+  variables: z.array(z.string()).optional(),
+});
+export type CreatePromptTemplateInput = z.infer<typeof CreatePromptTemplateInputSchema>;
+
+export const UpdatePromptTemplateInputSchema = z.object({
+  name: z.string().min(1).max(255).optional(),
+  template: z.string().min(1).optional(),
+  variables: z.array(z.string()).optional(),
+  isActive: z.boolean().optional(),
+});
+export type UpdatePromptTemplateInput = z.infer<typeof UpdatePromptTemplateInputSchema>;
+
+// ── Admin: AI Providers ───────────────────────────────────────────────────────
+
+export const UpdateAiProviderInputSchema = z.object({
+  provider: z.string().min(1).max(255).optional(),
+  model: z.string().min(1).max(255).optional(),
+  params: z.record(z.unknown()).optional(),
+  fallbackOrder: z.number().int().min(0).optional(),
+  isActive: z.boolean().optional(),
+});
+export type UpdateAiProviderInput = z.infer<typeof UpdateAiProviderInputSchema>;

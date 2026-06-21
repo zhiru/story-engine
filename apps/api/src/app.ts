@@ -9,6 +9,13 @@ import { storyRoutes } from "./routes/stories.js";
 import { creativeRoutes } from "./routes/creative.js";
 import { generateRoutes } from "./routes/generate.js";
 import { meRoutes } from "./routes/me.js";
+import { adminUserRoutes } from "./routes/admin/users.js";
+import { adminPlanRoutes } from "./routes/admin/plans.js";
+import { reportRoutes } from "./routes/admin/reports.js";
+import { adminAppSettingsRoutes } from "./routes/admin/appSettings.js";
+import { adminAuditRoutes } from "./routes/admin/audit.js";
+import { adminPromptTemplateRoutes } from "./routes/admin/promptTemplates.js";
+import { adminAiProviderRoutes } from "./routes/admin/aiProviders.js";
 import { resolveAppContext } from "./auth/appContext.js";
 
 export function buildApp() {
@@ -33,6 +40,13 @@ export function buildApp() {
   app.register(creativeRoutes, { prefix: "/api/v1" });
   app.register(generateRoutes, { prefix: "/api/v1" });
   app.register(meRoutes, { prefix: "/api/v1" });
+  app.register(adminUserRoutes, { prefix: "/api/v1" });
+  app.register(adminPlanRoutes, { prefix: "/api/v1" });
+  app.register(reportRoutes, { prefix: "/api/v1" });
+  app.register(adminAppSettingsRoutes, { prefix: "/api/v1" });
+  app.register(adminAuditRoutes, { prefix: "/api/v1" });
+  app.register(adminPromptTemplateRoutes, { prefix: "/api/v1" });
+  app.register(adminAiProviderRoutes, { prefix: "/api/v1" });
 
   return app;
 }
