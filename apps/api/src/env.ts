@@ -13,4 +13,12 @@ export const env = {
   aiBaseUrl: process.env.AI_BASE_URL ?? "",
   aiApiKey: process.env.AI_API_KEY ?? "",
   aiModel: process.env.AI_MODEL ?? "",
+  // Rate limiting
+  rateLimitDisabled: process.env.RATE_LIMIT_DISABLED === "true",
+  rateLimitGlobalMax: Number(process.env.RATE_LIMIT_GLOBAL_MAX ?? 120),
+  rateLimitGlobalWindowMs: Number(process.env.RATE_LIMIT_GLOBAL_WINDOW_MS ?? 60000),
+  rateLimitGenerateMax: Number(process.env.RATE_LIMIT_GENERATE_MAX ?? 10),
+  rateLimitGenerateWindowMs: Number(process.env.RATE_LIMIT_GENERATE_WINDOW_MS ?? 60000),
+  // LGPD
+  lgpdHashSalt: process.env.LGPD_HASH_SALT ?? "storygen-dev-salt",
 };

@@ -10,11 +10,14 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx --env-file .env src/db/migrate.ts",
     "db:seed": "tsx --env-file .env src/db/seed.ts",
-    "test": "node --env-file .env ../../node_modules/.bin/vitest run"
+    "test": "node --env-file .env ../../node_modules/.bin/vitest run",
+    "job:retention": "tsx --env-file .env src/jobs/retention.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
+    "@fastify/rate-limit": "^11.0.0",
     "@node-rs/argon2": "^2.0.2",
+    "@sentry/node": "^10.59.0",
     "@storygen/shared": "workspace:*",
     "drizzle-orm": "^0.36",
     "fastify": "^5",

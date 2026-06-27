@@ -240,3 +240,33 @@ export const UpdateAiProviderInputSchema = z.object({
   isActive: z.boolean().optional(),
 });
 export type UpdateAiProviderInput = z.infer<typeof UpdateAiProviderInputSchema>;
+
+// ── LGPD Erasure ─────────────────────────────────────────────────────────────
+
+export const ErasureResultSchema = z.object({
+  ok: z.literal(true),
+  anonymized: z.object({
+    childProfiles: z.number().int(),
+    refreshTokens: z.number().int(),
+    characters: z.number().int(),
+    stories: z.number().int(),
+  }),
+});
+export type ErasureResult = z.infer<typeof ErasureResultSchema>;
+
+// ── Admin: Cost Summary ───────────────────────────────────────────────────────
+
+export const CostSummaryProviderSchema = z.object({
+  provider: z.string(),
+  count: z.number().int(),
+  inputTokens: z.number(),
+  outputTokens: z.number(),
+});
+
+export const CostSummarySchema = z.object({
+  period: z.string(), // YYYY-MM
+  totalStoriesGenerated: z.number().int(),
+  usageRecordsTotal: z.number().int(),
+  byProvider: z.array(CostSummaryProviderSchema),
+});
+export type CostSummary = z.infer<typeof CostSummarySchema>;

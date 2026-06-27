@@ -148,3 +148,8 @@ apps/mobile/.expo/
 # Deploy web bundles
 deploy/dist-single/
 deploy/dist-multi/
+
+# Segredos de acesso (NUNCA commitar)
+server-access.md
+*.local.md
+ACESSOS*.md
