@@ -1,14 +1,21 @@
 /**
- * Weather/time context for story generation.
- * Without an API key, falls back to a deterministic pseudo-random choice
- * derived from the user ID + current date so the same user gets a consistent
- * "weather" within a day but differs from other users / other days.
+ * Contexto de clima/horário para geração (SDD 7.2 / 8.3).
+ *
+ * - Com geolocalização: consulta OpenWeatherMap (ai/weather.ts, cache 30 min
+ *   por célula geográfica) → source: "openweather".
+ * - Sem geolocalização / falha / sem chave: fallback determinístico por seed
+ *   (user_id + data) — mesmo usuário tem clima consistente no dia, mas difere
+ *   de outros usuários/dias → source: "fallback".
  */
 
+import { getWeatherByGeo, timeOfDayPtBr } from "./weather.js";
+
+/** Forma canônica do SDD 7.2: { temp, condition, time, source }. */
 export interface WeatherContext {
-  temperature: number; // °C
-  condition: string; // human-readable PT
-  currentTime: string; // "manhã" | "tarde" | "noite"
+  temp: number; // °C
+  condition: string; // legível em pt-BR
+  time: string; // Manhã | Tarde | Noite | Madrugada
+  source: "openweather" | "fallback";
 }
 
 const CONDITIONS = [
@@ -32,30 +39,36 @@ function deterministicIndex(seed: string, length: number): number {
   return hash % length;
 }
 
-function timeOfDay(): string {
-  const hour = new Date().getUTCHours();
-  if (hour >= 5 && hour < 12) return "manhã";
-  if (hour >= 12 && hour < 18) return "tarde";
-  return "noite";
-}
-
-/**
- * Returns weather context. If geo is provided (future real integration),
- * it would call an external API. Currently always uses the deterministic stub.
- */
-export function getContext(
+/** Fallback determinístico (seed user_id + data) — SDD 8.3. */
+export function getFallbackContext(
   userId: string,
-  _geo?: { lat: number; lng: number },
+  now: Date = new Date(),
 ): WeatherContext {
-  const dateStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const dateStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
   const seed = `${userId}-${dateStr}`;
 
   const condIdx = deterministicIndex(seed + "cond", CONDITIONS.length);
   const tempIdx = deterministicIndex(seed + "temp", TEMPERATURES.length);
 
   return {
-    temperature: TEMPERATURES[tempIdx]!,
+    temp: TEMPERATURES[tempIdx]!,
     condition: CONDITIONS[condIdx]!,
-    currentTime: timeOfDay(),
+    time: timeOfDayPtBr(now),
+    source: "fallback",
   };
+}
+
+/**
+ * Retorna o contexto de clima. Com geo, tenta o OpenWeatherMap; sem geo,
+ * sem chave ou em erro/timeout, usa o fallback determinístico.
+ */
+export async function getContext(
+  userId: string,
+  geo?: { lat: number; lng: number },
+): Promise<WeatherContext> {
+  if (geo) {
+    const real = await getWeatherByGeo(geo);
+    if (real) return real;
+  }
+  return getFallbackContext(userId);
 }

@@ -257,12 +257,22 @@ describe("GET /api/v1/admin/cost", () => {
     const now = new Date();
     const period = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 
-    // Seed stories with generationCost
+    // Seed stories with generationCost (SDD 8.5: snake_case + model)
     await seedStory(universe.id, admin.id, {
-      generationCost: { provider: "claude", inputTokens: 100, outputTokens: 200 },
+      generationCost: {
+        provider: "claude",
+        model: "claude-sonnet",
+        input_tokens: 100,
+        output_tokens: 200,
+      },
     });
     await seedStory(universe.id, admin.id, {
-      generationCost: { provider: "claude", inputTokens: 50, outputTokens: 80 },
+      generationCost: {
+        provider: "claude",
+        model: "claude-sonnet",
+        input_tokens: 50,
+        output_tokens: 80,
+      },
     });
 
     // Seed usage record

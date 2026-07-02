@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { buildApp } from "../../app.js";
 import { resetDb, seedUser } from "../../test/db.js";
 import { signAccess } from "../../auth/jwt.js";
+import { eq } from "drizzle-orm";
 import { db } from "../../db/client.js";
 import {
   plans,
@@ -13,6 +14,7 @@ import {
   universes,
   auditLogs,
 } from "../../db/schema.js";
+import { SAFETY_BLOCK } from "../../ai/prompt.js";
 
 const app = buildApp();
 
@@ -77,7 +79,7 @@ async function seedPromptTemplate(aiProviderId: string, createdBy: string) {
       aiProviderId,
       name: "test-template",
       version: 1,
-      template: "Tell a story about {{universe}}",
+      template: `${SAFETY_BLOCK}\nTell a story about {{universe}}`,
       variables: ["universe"],
       isActive: false,
       createdBy,
@@ -630,7 +632,7 @@ describe("POST /api/v1/admin/prompt-templates", () => {
       payload: {
         aiProviderId: provider.id,
         name: "kids-story-v2",
-        template: "New template text {{universe}}",
+        template: `${SAFETY_BLOCK}\nNew template text {{universe}}`,
         variables: ["universe"],
       },
     });
@@ -638,6 +640,25 @@ describe("POST /api/v1/admin/prompt-templates", () => {
     const body = res.json();
     expect(body.isActive).toBe(false);
     expect(body.version).toBe(1);
+  });
+
+  it("returns 422 SAFETY_BLOCK_REQUIRED when template lacks the fixed safety block", async () => {
+    const admin = await seedUser({ email: "admin@x.com", role: "ADMIN" });
+    const provider = await seedAiProvider();
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/prompt-templates",
+      headers: bearer(admin.id, "ADMIN"),
+      payload: {
+        aiProviderId: provider.id,
+        name: "unsafe-template",
+        template: "Template sem o bloco de segurança {{universe}}",
+        variables: ["universe"],
+      },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe("SAFETY_BLOCK_REQUIRED");
   });
 
   it("increments version for same provider", async () => {
@@ -652,7 +673,7 @@ describe("POST /api/v1/admin/prompt-templates", () => {
       payload: {
         aiProviderId: provider.id,
         name: "kids-story-v2",
-        template: "Version 2 template",
+        template: `${SAFETY_BLOCK}\nVersion 2 template`,
         variables: [],
       },
     });
@@ -675,7 +696,7 @@ describe("PATCH /api/v1/admin/prompt-templates/:id", () => {
         aiProviderId: provider.id,
         name: "v1",
         version: 1,
-        template: "v1 text",
+        template: `${SAFETY_BLOCK}\nv1 text`,
         variables: [],
         isActive: true,
         createdBy: admin.id,
@@ -689,7 +710,7 @@ describe("PATCH /api/v1/admin/prompt-templates/:id", () => {
         aiProviderId: provider.id,
         name: "v2",
         version: 2,
-        template: "v2 text",
+        template: `${SAFETY_BLOCK}\nv2 text`,
         variables: [],
         isActive: false,
         createdBy: admin.id,
@@ -732,6 +753,62 @@ describe("PATCH /api/v1/admin/prompt-templates/:id", () => {
       payload: { name: "updated" },
     });
     expect(res.statusCode).toBe(404);
+  });
+
+  it("returns 422 when update removes the fixed safety block", async () => {
+    const admin = await seedUser({ email: "admin@x.com", role: "ADMIN" });
+    const provider = await seedAiProvider();
+    const template = await seedPromptTemplate(provider.id, admin.id);
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/admin/prompt-templates/${template.id}`,
+      headers: bearer(admin.id, "ADMIN"),
+      payload: { template: "Texto novo sem o bloco de segurança" },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe("SAFETY_BLOCK_REQUIRED");
+
+    // Template original permanece intacto
+    const [unchanged] = await db
+      .select()
+      .from(promptTemplates)
+      .where(eq(promptTemplates.id, template.id));
+    expect(unchanged!.template).toContain(SAFETY_BLOCK);
+  });
+
+  it("returns 422 when activating a template that lacks the safety block", async () => {
+    const admin = await seedUser({ email: "admin@x.com", role: "ADMIN" });
+    const provider = await seedAiProvider();
+
+    // Template legado sem o bloco (inserido direto no banco)
+    const [legacy] = await db
+      .insert(promptTemplates)
+      .values({
+        aiProviderId: provider.id,
+        name: "legacy",
+        version: 1,
+        template: "template antigo sem bloco",
+        variables: [],
+        isActive: false,
+        createdBy: admin.id,
+      })
+      .returning();
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/admin/prompt-templates/${legacy!.id}`,
+      headers: bearer(admin.id, "ADMIN"),
+      payload: { isActive: true },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe("SAFETY_BLOCK_REQUIRED");
+
+    const [stillInactive] = await db
+      .select()
+      .from(promptTemplates)
+      .where(eq(promptTemplates.id, legacy!.id));
+    expect(stillInactive!.isActive).toBe(false);
   });
 });
 

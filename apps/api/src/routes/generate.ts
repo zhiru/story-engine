@@ -40,6 +40,7 @@ export async function generateRoutes(app: FastifyInstance): Promise<void> {
             CONTENT_REJECTED: 422,
             GENERATION_FAILED: 503,
             UNIVERSE_ACCESS_DENIED: 403,
+            CHILD_PROFILE_NOT_FOUND: 404,
           };
           const status = statusMap[err.code] ?? 500;
           return sendError(reply, status, err.code, err.message);

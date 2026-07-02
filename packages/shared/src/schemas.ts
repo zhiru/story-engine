@@ -273,3 +273,34 @@ export const CostSummarySchema = z.object({
   byProvider: z.array(CostSummaryProviderSchema),
 });
 export type CostSummary = z.infer<typeof CostSummarySchema>;
+
+// ── Pipeline de IA: clima/contexto e resposta de geração (SDD 7.2 / 8.3) ─────
+// [Task D] Novos schemas — mantidos ao final do arquivo (merge-friendly).
+
+/** Forma canônica do SDD 7.2: metadata_weather = { temp, condition, time, source }. */
+export const WeatherMetadataSchema = z.object({
+  temp: z.number(), // °C
+  condition: z.string(), // pt-BR (Ensolarado/Nublado/Chuvoso/…)
+  time: z.string(), // Manhã | Tarde | Noite | Madrugada
+  source: z.enum(["openweather", "fallback"]),
+});
+export type WeatherMetadata = z.infer<typeof WeatherMetadataSchema>;
+
+/** Resposta 201 de POST /stories/generate (SDD 7.2). */
+export const GenerateStoryResponseSchema = z.object({
+  id: z.string().uuid(),
+  title: z.string(),
+  content: z.string(),
+  story_arc_id: z.string().uuid().nullable(),
+  metadata_weather: WeatherMetadataSchema,
+});
+export type GenerateStoryResponse = z.infer<typeof GenerateStoryResponseSchema>;
+
+/** Custo de geração persistido em stories.generation_cost (SDD 8.5, snake_case). */
+export const GenerationCostSchema = z.object({
+  input_tokens: z.number().int().min(0),
+  output_tokens: z.number().int().min(0),
+  provider: z.string(),
+  model: z.string(),
+});
+export type GenerationCost = z.infer<typeof GenerationCostSchema>;

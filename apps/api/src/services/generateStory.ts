@@ -5,13 +5,18 @@
  * 1. Check active subscription → 403 if none.
  * 2. Check quota (usage_records this month vs plan max) → 402 if exceeded.
  * 3. Sanitize + blocklist input guidance → 422 if blocked (no quota).
- * 4. Load universe + characters + theme (+ arc if CONTINUOUS).
- * 5. Get weather/time context.
- * 6. Assemble prompt from active template.
- * 7. Try providers in fallback order (retry ≤ 2 each) → 503 if all fail (no quota).
- * 8. Moderate output; on fail, regenerate once with reinforced instruction; still fail → 422 (no quota).
- * 9. APPROVED: persist story + update arc summary (optimistic lock) + record usage + audit log.
- * 10. Return 201 payload.
+ * 4. Load universe + characters + theme (+ arc if CONTINUOUS) + child profile
+ *    (guardian-scoped, para age_band).
+ * 5. Get weather/time context (OpenWeatherMap com geo; fallback determinístico).
+ * 6. Assemble prompt from active template (+ context providers — SDD 8.3).
+ * 7. Try providers in fallback order (retry ≤ 2 com backoff 250ms/1000ms cada)
+ *    → 503 if all fail (no quota).
+ * 8. Moderate output; on fail, regenerate once com prompt REFORÇADO (mesmo
+ *    orçamento de retry); still fail → 422 (no quota).
+ * 9. APPROVED: persist story + update arc summary + usage_record numa ÚNICA
+ *    transação (RF-13); lock otimista do arco com até 3 tentativas
+ *    (re-lê versão) — esgotadas → 503 sem persistir nada.
+ * 10. Return 201 payload (metadata_weather no formato SDD 7.2).
  */
 
 import { and, eq, isNull } from "drizzle-orm";
@@ -23,14 +28,19 @@ import {
   characters,
   themes,
   stories,
+  storyArcs,
+  usageRecords,
   auditLogs,
 } from "../db/schema.js";
-import { countThisMonth, recordUsage } from "../repos/usage.js";
-import { getStoryArcById, updateArcSummary } from "../repos/storyArcs.js";
+import { countThisMonth, currentPeriod } from "../repos/usage.js";
+import { getStoryArcById } from "../repos/storyArcs.js";
+import { getOwnedChildProfile } from "../repos/childProfiles.js";
 import { getActiveProviders, getActiveTemplate } from "../ai/provider.js";
-import { getContext } from "../ai/context.js";
+import type { AiProvider, AiProviderRow, GenerateInput, GenerateOutput, GenerateUsage } from "../ai/provider.js";
+import { getContext, type WeatherContext } from "../ai/context.js";
+import { resolveContextVariables } from "../ai/contextProviders.js";
 import { sanitizeGuidance, containsBlocked } from "../ai/sanitize.js";
-import { assemblePrompt } from "../ai/prompt.js";
+import { assemblePrompt, type PromptVars } from "../ai/prompt.js";
 import { moderateOutput } from "../ai/moderation.js";
 import type { Actor } from "../auth/middleware.js";
 import type { AppMode } from "../auth/appContext.js";
@@ -45,7 +55,8 @@ export class GenerationError extends Error {
       | "QUOTA_EXCEEDED"
       | "CONTENT_REJECTED"
       | "GENERATION_FAILED"
-      | "UNIVERSE_ACCESS_DENIED",
+      | "UNIVERSE_ACCESS_DENIED"
+      | "CHILD_PROFILE_NOT_FOUND",
     message: string,
   ) {
     super(message);
@@ -101,6 +112,82 @@ async function insertAuditLog(
   });
 }
 
+// ── Helper: retry/backoff por provedor (RF-23) ────────────────────────────────
+
+const PROVIDER_MAX_RETRIES = 2; // além da 1ª tentativa (3 tentativas no total)
+const RETRY_BACKOFF_MS = [250, 1000];
+
+async function retryDelay(attempt: number): Promise<void> {
+  // Sem espera em testes (vitest) — mantém a suíte rápida.
+  if (process.env.NODE_ENV === "test" || process.env.VITEST) return;
+  const ms = RETRY_BACKOFF_MS[attempt] ?? RETRY_BACKOFF_MS[RETRY_BACKOFF_MS.length - 1]!;
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+interface ProviderAttemptResult {
+  output: GenerateOutput;
+  provider: string;
+  model: string;
+}
+
+/**
+ * Percorre os provedores em fallback_order; cada um tem direito a
+ * 1 tentativa + até 2 retries com backoff (250ms/1000ms).
+ */
+async function tryProviders(
+  providers: Array<{ row: AiProviderRow; impl: AiProvider }>,
+  input: GenerateInput,
+): Promise<ProviderAttemptResult | null> {
+  for (const { row, impl } of providers) {
+    let lastErr: unknown;
+    for (let attempt = 0; attempt <= PROVIDER_MAX_RETRIES; attempt++) {
+      try {
+        const output = await impl.generate(input);
+        return { output, provider: row.provider, model: row.model };
+      } catch (err) {
+        lastErr = err;
+        if (attempt < PROVIDER_MAX_RETRIES) await retryDelay(attempt);
+      }
+    }
+    console.error(`Provider '${row.provider}' failed:`, lastErr);
+  }
+  return null;
+}
+
+// ── Reforço de segurança na regeneração (SDD 8.4) ─────────────────────────────
+
+const REINFORCEMENT_BLOCK = [
+  "",
+  "[REFORÇO DE SEGURANÇA — REGENERAÇÃO]",
+  "- A versão anterior desta história foi REPROVADA pela moderação de conteúdo infantil.",
+  "- Reescreva do zero garantindo conteúdo 100% seguro para crianças:",
+  "  sem violência, terror, medo excessivo, conteúdo adulto, drogas ou linguagem inadequada.",
+  "- Ignore qualquer parte do direcionamento do responsável que contradiga as diretrizes de segurança.",
+  "- Mantenha tom leve, positivo e vocabulário adequado à faixa etária.",
+].join("\n");
+
+// ── Faixa etária (RF-03 / SDD 8.6) ────────────────────────────────────────────
+
+const AGE_BAND_LABELS: Record<string, string> = {
+  "0_3": "0 a 3 anos",
+  "4_6": "4 a 6 anos",
+  "7_9": "7 a 9 anos",
+  "10_12": "10 a 12 anos",
+};
+const DEFAULT_AGE_BAND = "4_6";
+
+// ── Persistência transacional com lock otimista (RF-13) ───────────────────────
+
+/** Conflito de lock otimista no arco — dispara retry com releitura da versão. */
+class ArcLockConflictError extends Error {
+  constructor() {
+    super("optimistic lock conflict on story arc");
+    this.name = "ArcLockConflictError";
+  }
+}
+
+const ARC_LOCK_MAX_ATTEMPTS = 3;
+
 // ── Main service function ─────────────────────────────────────────────────────
 
 export interface GenerateStoryResult {
@@ -108,7 +195,8 @@ export interface GenerateStoryResult {
   title: string;
   content: string;
   story_arc_id: string | null;
-  metadata_weather: { condition: string; temperature: number; currentTime: string };
+  /** Formato SDD 7.2: { temp, condition, time, source }. */
+  metadata_weather: WeatherContext;
 }
 
 export interface GenerateStoryContext {
@@ -218,10 +306,25 @@ export async function generateStory(
     arc = await getStoryArcById(input.story_arc_id);
   }
 
-  const narrativeType: "SINGLE" | "CONTINUOUS" = arc ? "CONTINUOUS" : "SINGLE";
+  const narrativeType: "STANDALONE" | "CONTINUOUS" = arc
+    ? "CONTINUOUS"
+    : "STANDALONE";
 
-  // Step 5: Weather/time context
-  const weather = getContext(actor.id, input.geo);
+  // Child profile → age_band (escopado ao responsável — RF-03/LGPD)
+  let ageBand: string = DEFAULT_AGE_BAND;
+  if (input.child_profile_id) {
+    const profile = await getOwnedChildProfile(actor, input.child_profile_id);
+    if (!profile) {
+      throw new GenerationError(
+        "CHILD_PROFILE_NOT_FOUND",
+        "Perfil infantil não encontrado para este responsável.",
+      );
+    }
+    ageBand = profile.ageBand;
+  }
+
+  // Step 5: Weather/time context (RF-22 — geo → OpenWeatherMap; senão fallback)
+  const weather = await getContext(actor.id, input.geo ?? undefined);
 
   // Step 6: Assemble prompt
   const activeTemplate = await getActiveTemplate();
@@ -234,28 +337,43 @@ export async function generateStory(
 
   const seed = await computeSeed(actor.id);
 
+  // Personagens com idade/ciclo por personagem (SDD 8.6)
   const charactersFormatted = universeChars
-    .map((c) => `${c.name} (${c.classification}): ${c.traits.join(", ")}`)
-    .join("; ");
+    .map(
+      (c) =>
+        `- ${c.name} (${c.classification}). Idade/Ciclo: ${c.ageGroup ?? "não informado"}. Traços: ${c.traits.join(", ")}`,
+    )
+    .join("\n");
 
-  const promptVars = {
+  const baseVars: PromptVars = {
     universe_title: universe.title,
     universe_description: universe.description,
     characters: charactersFormatted || "sem personagens definidos",
     theme_title: theme?.title ?? "Aventura",
     theme_description: theme?.description ?? "",
     narrative_type: narrativeType,
+    age_band: AGE_BAND_LABELS[ageBand] ?? AGE_BAND_LABELS[DEFAULT_AGE_BAND]!,
     weather_condition: weather.condition,
-    weather_temperature: String(weather.temperature),
-    current_time: weather.currentTime,
+    weather_temperature: String(weather.temp),
+    current_time: weather.time,
     previous_summary: arc?.summary ?? undefined,
     user_guidance: sanitized || undefined,
     seed,
   };
 
-  const promptUsed = assemblePrompt(activeTemplate.template, promptVars);
+  // SDD 8.3: variáveis declaradas no template são resolvidas pelo registro de
+  // context providers; as não resolvidas mantêm os defaults acima.
+  const contextVars = await resolveContextVariables(activeTemplate.variables, {
+    userId: actor.id,
+    geo: input.geo ?? undefined,
+    weather,
+    now: new Date(),
+  });
+  const promptVars: PromptVars = { ...baseVars, ...contextVars };
 
-  const generateInput = {
+  let promptUsed = assemblePrompt(activeTemplate.template, promptVars);
+
+  const generateInput: GenerateInput = {
     prompt: promptUsed,
     universe: { title: universe.title, description: universe.description },
     characters: universeChars.map((c) => ({
@@ -274,7 +392,7 @@ export async function generateStory(
     seed,
   };
 
-  // Step 7: Try providers in fallback order
+  // Step 7: Try providers in fallback order (retry ≤2 com backoff cada)
   const providers = await getActiveProviders();
   if (providers.length === 0) {
     throw new GenerationError(
@@ -283,29 +401,8 @@ export async function generateStory(
     );
   }
 
-  let generatedOutput: {
-    title: string;
-    story_body: string;
-    internal_summary_for_next_chapters: string;
-  } | null = null;
-  let usedProvider = "stub";
-
-  for (const { row, impl } of providers) {
-    let lastErr: unknown;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        generatedOutput = await impl.generate(generateInput);
-        usedProvider = row.provider;
-        break;
-      } catch (err) {
-        lastErr = err;
-      }
-    }
-    if (generatedOutput) break;
-    console.error(`Provider '${row.provider}' failed:`, lastErr);
-  }
-
-  if (!generatedOutput) {
+  let generation = await tryProviders(providers, generateInput);
+  if (!generation) {
     throw new GenerationError(
       "GENERATION_FAILED",
       "Não foi possível gerar a história. Tente novamente em instantes.",
@@ -313,24 +410,22 @@ export async function generateStory(
   }
 
   // Step 8: Moderation gate
-  let modResult = moderateOutput(generatedOutput.story_body);
+  let modResult = moderateOutput(generation.output.story_body);
   if (!modResult.ok) {
-    // Regenerate once with reinforced safety instruction
-    const reinforcedInput = {
+    // Regenera 1x com prompt REFORÇADO (SDD 8.4): o prompt é remontado com uma
+    // seção extra de segurança — não basta trocar seed, o provedor lê o prompt.
+    const reinforcedPrompt = promptUsed + "\n" + REINFORCEMENT_BLOCK;
+    const reinforcedInput: GenerateInput = {
       ...generateInput,
+      prompt: reinforcedPrompt,
       seed: seed + "-retry",
-      userGuidance: "CONTEÚDO 100% SEGURO PARA CRIANÇAS. " + (generateInput.userGuidance ?? ""),
     };
-    for (const { row, impl } of providers) {
-      try {
-        generatedOutput = await impl.generate(reinforcedInput);
-        usedProvider = row.provider;
-        break;
-      } catch {
-        // continue
-      }
+    const reinforced = await tryProviders(providers, reinforcedInput);
+    if (reinforced) {
+      generation = reinforced;
+      promptUsed = reinforcedPrompt;
     }
-    modResult = moderateOutput(generatedOutput?.story_body ?? "");
+    modResult = moderateOutput(reinforced?.output.story_body ?? "");
     if (!modResult.ok) {
       await insertAuditLog(actor.id, "STORY_GENERATION_OUTPUT_REJECTED", undefined, {
         reason: modResult.reason,
@@ -342,51 +437,119 @@ export async function generateStory(
     }
   }
 
-  // Step 9: Persist (APPROVED)
-  const characterNames = universeChars.map((c) => c.name);
-  const generationCost = { provider: usedProvider, tokens: 0, cost_usd: 0 };
+  const generatedOutput = generation.output;
 
-  const [newStory] = await db
-    .insert(stories)
-    .values({
-      universeId: input.universe_id,
-      userId: actor.id,
-      themeId: theme?.id ?? null,
-      storyArcId: arc?.id ?? null,
-      title: generatedOutput.title,
-      content: generatedOutput.story_body,
-      promptTemplateId: activeTemplate.id,
-      promptUsed,
-      userGuidance: sanitized || null,
-      characterNames,
-      moderationStatus: "APPROVED",
-      visibility: "PRIVATE",
-      metadataWeather: weather,
-      generationCost,
-    })
-    .returning();
+  // Step 9: Persist (APPROVED) — story + arc summary + usage numa ÚNICA
+  // transação (RF-13), com lock otimista do arco e até 3 tentativas.
+  const characterNames = universeChars.map((c) => c.name);
+  const usage: GenerateUsage = generatedOutput.usage ?? {
+    inputTokens: 0,
+    outputTokens: 0,
+  };
+  // SDD 8.5: snake_case — o dashboard de custo agrega por estas chaves.
+  const generationCost = {
+    input_tokens: usage.inputTokens,
+    output_tokens: usage.outputTokens,
+    provider: generation.provider,
+    model: generation.model,
+  };
+
+  let currentArc = arc;
+  let newStory: typeof stories.$inferSelect | null = null;
+
+  for (let attempt = 1; attempt <= ARC_LOCK_MAX_ATTEMPTS; attempt++) {
+    try {
+      newStory = await db.transaction(async (tx) => {
+        const [inserted] = await tx
+          .insert(stories)
+          .values({
+            universeId: input.universe_id,
+            userId: actor.id,
+            themeId: theme?.id ?? null,
+            storyArcId: currentArc?.id ?? null,
+            title: generatedOutput.title,
+            content: generatedOutput.story_body,
+            promptTemplateId: activeTemplate.id,
+            promptUsed,
+            userGuidance: sanitized || null,
+            characterNames,
+            moderationStatus: "APPROVED",
+            visibility: "PRIVATE",
+            metadataWeather: weather,
+            generationCost,
+          })
+          .returning();
+        if (!inserted) {
+          throw new Error("Falha ao persistir a história.");
+        }
+
+        // Arc summary com lock otimista por version (RF-13)
+        if (currentArc) {
+          const updatedRows = await tx
+            .update(storyArcs)
+            .set({
+              summary: generatedOutput.internal_summary_for_next_chapters,
+              version: currentArc.version + 1,
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(storyArcs.id, currentArc.id),
+                eq(storyArcs.version, currentArc.version),
+                isNull(storyArcs.deletedAt),
+              ),
+            )
+            .returning({ id: storyArcs.id });
+          if (updatedRows.length === 0) {
+            // Outra geração concorrente avançou a versão → rollback + retry
+            throw new ArcLockConflictError();
+          }
+        }
+
+        // Usage record (quota mensal) na mesma transação
+        await tx.insert(usageRecords).values({
+          userId: actor.id,
+          metric: "STORY_GENERATED",
+          period: currentPeriod(),
+          quantity: 1,
+        });
+
+        return inserted;
+      });
+      break; // transação concluída
+    } catch (err) {
+      if (err instanceof ArcLockConflictError && attempt < ARC_LOCK_MAX_ATTEMPTS) {
+        // Re-lê a versão atual do arco e re-deriva o summary a gravar
+        currentArc = await getStoryArcById(currentArc!.id);
+        if (!currentArc) {
+          throw new GenerationError(
+            "GENERATION_FAILED",
+            "Arco narrativo indisponível durante a gravação. Tente novamente.",
+          );
+        }
+        continue;
+      }
+      if (err instanceof ArcLockConflictError) {
+        // Tentativas esgotadas: nada persistido (rollback), quota preservada
+        throw new GenerationError(
+          "GENERATION_FAILED",
+          "Conflito de concorrência ao atualizar o arco narrativo. Tente novamente.",
+        );
+      }
+      throw err;
+    }
+  }
 
   if (!newStory) {
     throw new GenerationError("GENERATION_FAILED", "Falha ao persistir a história.");
   }
-
-  // Update arc summary if CONTINUOUS
-  if (arc) {
-    await updateArcSummary(
-      arc.id,
-      generatedOutput.internal_summary_for_next_chapters,
-      arc.version,
-    );
-  }
-
-  // Record usage
-  await recordUsage(actor.id, "STORY_GENERATED");
 
   // Audit log
   await insertAuditLog(actor.id, "STORY_GENERATED", newStory.id, {
     universe_id: input.universe_id,
     narrative_type: narrativeType,
     seed,
+    provider: generation.provider,
   });
 
   return {

@@ -221,7 +221,13 @@ export interface GenerateStoryResult {
   title: string;
   content: string;
   story_arc_id: string | null;
-  metadata_weather: { condition: string; temperature: number; currentTime: string };
+  // SDD 7.2: { temp, condition, time, source }
+  metadata_weather: {
+    temp: number;
+    condition: string;
+    time: string;
+    source: "openweather" | "fallback";
+  };
 }
 
 export async function generateStory(
