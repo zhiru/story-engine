@@ -273,3 +273,60 @@ export const CostSummarySchema = z.object({
   byProvider: z.array(CostSummaryProviderSchema),
 });
 export type CostSummary = z.infer<typeof CostSummarySchema>;
+
+// ===== Billing (WP-A) =====
+
+/**
+ * Evento de webhook do RevenueCat (RF-50). O RevenueCat envia muitos campos
+ * extras — o schema é intencionalmente permissivo (passthrough) e valida só
+ * o essencial para a máquina de estados de assinatura.
+ */
+export const BillingWebhookEventSchema = z
+  .object({
+    event: z
+      .object({
+        id: z.string().min(1),
+        type: z.string().min(1),
+        app_user_id: z.string().min(1),
+        product_id: z.string().nullish(),
+        entitlement_ids: z.array(z.string()).nullish(),
+        store: z.string().nullish(),
+        expiration_at_ms: z.number().nullish(),
+        original_app_user_id: z.string().nullish(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+export type BillingWebhookEvent = z.infer<typeof BillingWebhookEventSchema>;
+
+export const MeSubscriptionResponseSchema = z.object({
+  subscription: z
+    .object({
+      plan: z.object({
+        id: z.string().uuid(),
+        name: z.string(),
+        max_universes: z.number().int(),
+        max_stories_per_month: z.number().int(),
+        price_cents: z.number().int(),
+      }),
+      status: z.enum(["ACTIVE", "PAST_DUE", "CANCELED", "EXPIRED"]),
+      store: z.enum(["APP_STORE", "PLAY_STORE", "STRIPE"]),
+      current_period_end: z.string(),
+      is_active: z.boolean(),
+    })
+    .nullable(),
+});
+export type MeSubscriptionResponse = z.infer<typeof MeSubscriptionResponseSchema>;
+
+export const MeUsageResponseSchema = z.object({
+  period: z.string().regex(/^\d{4}-\d{2}$/),
+  stories_generated: z.number().int().min(0),
+  universes_created: z.number().int().min(0),
+  limits: z
+    .object({
+      max_universes: z.number().int(),
+      max_stories_per_month: z.number().int(),
+    })
+    .nullable(),
+});
+export type MeUsageResponse = z.infer<typeof MeUsageResponseSchema>;
