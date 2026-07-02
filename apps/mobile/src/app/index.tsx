@@ -8,7 +8,7 @@ import {
   StyleSheet,
   RefreshControl,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useAuth } from '../auth/AuthContext';
 import { getConfig, listStories, listMyUniverses } from '../lib/api';
 import { useAppTheme } from '../theme/AppThemeContext';
@@ -169,13 +169,14 @@ function MultiModeView({ accessToken }: { accessToken: string }) {
     setRefreshing(false);
   }
 
-  // When returning from create-universe screen, refresh the list
-  useEffect(() => {
-    const unsubscribe = router.addListener?.('focus', () => {
+  // Ao voltar para esta tela (ex.: após criar um universo em /create-universe),
+  // recarrega a lista. router.addListener('focus') não existe no expo-router —
+  // useFocusEffect é o primitivo correto (re-executa a cada foco da rota).
+  useFocusEffect(
+    useCallback(() => {
       void load();
-    });
-    return unsubscribe;
-  }, [router, load]);
+    }, [load]),
+  );
 
   if (loading) {
     return (

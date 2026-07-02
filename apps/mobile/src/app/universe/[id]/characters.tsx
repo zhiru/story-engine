@@ -261,7 +261,9 @@ export default function UniverseCharactersScreen() {
         const input: UpdateCharacterInput = {
           name: form.name.trim(),
           classification: form.classification,
-          ageGroup: form.ageGroup || undefined,
+          // Envia "" (não undefined) ao selecionar "Qualquer" para que limpar a
+          // faixa etária persista o clear — undefined seria omitido do PATCH.
+          ageGroup: form.ageGroup,
           traits,
         };
         await updateCharacter(id, editingCharacter.id, input, accessToken);
@@ -405,6 +407,7 @@ export default function UniverseCharactersScreen() {
               <Text style={styles.formError}>{formError}</Text>
             ) : null}
             <CharacterForm
+              key={editingCharacter?.id ?? 'new'}
               initial={formInitial}
               onSave={(f) => void handleSave(f)}
               onCancel={() => {

@@ -409,6 +409,7 @@ export default function PromptsScreen() {
             </Text>
             {formError ? <Text style={styles.formError}>{formError}</Text> : null}
             <PromptForm
+              key={editingTemplate?.id ?? 'new'}
               initial={formInitial}
               providers={providers}
               providerLocked={!!editingTemplate}

@@ -83,6 +83,14 @@ function buildAdminGroups(role: string | null): NavGroup[] {
 // refazer GET /config a cada troca de tela.
 let cachedAppMode: 'SINGLE' | 'MULTI' | null = null;
 
+/**
+ * Limpa o cache do modo do app. Chamado no signOut para que o próximo usuário
+ * não herde a navegação (ex.: link "Descobrir" do modo MULTI) do anterior.
+ */
+export function resetAppModeCache(): void {
+  cachedAppMode = null;
+}
+
 function useAppMode(): 'SINGLE' | 'MULTI' | null {
   const { accessToken } = useAuth();
   const [mode, setMode] = useState<'SINGLE' | 'MULTI' | null>(cachedAppMode);

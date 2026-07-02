@@ -374,6 +374,7 @@ export default function PlansScreen() {
             </Text>
             {formError ? <Text style={styles.formError}>{formError}</Text> : null}
             <PlanForm
+              key={editingPlan?.id ?? 'new'}
               initial={formInitial}
               onSave={(f) => void handleSave(f)}
               onCancel={() => {

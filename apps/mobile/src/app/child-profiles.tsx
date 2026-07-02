@@ -338,6 +338,7 @@ export default function ChildProfilesScreen() {
             </Text>
             {formError ? <Text style={styles.formError}>{formError}</Text> : null}
             <ProfileForm
+              key={editingProfile?.id ?? 'new'}
               initial={formInitial}
               onSave={(f) => void handleSave(f)}
               onCancel={() => {
