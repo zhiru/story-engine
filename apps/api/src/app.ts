@@ -9,6 +9,8 @@ import { childProfileRoutes } from "./routes/childProfiles.js";
 import { configRoutes } from "./routes/config.js";
 import { storyRoutes } from "./routes/stories.js";
 import { creativeRoutes } from "./routes/creative.js";
+import { discoveryRoutes } from "./routes/discovery.js";
+import { ratingRoutes } from "./routes/ratings.js";
 import { generateRoutes } from "./routes/generate.js";
 import { meRoutes } from "./routes/me.js";
 import { billingRoutes } from "./routes/billing.js";
@@ -115,6 +117,8 @@ export function buildApp(opts?: { disableLogger?: boolean }) {
   app.register(configRoutes, { prefix: "/api/v1" });
   app.register(storyRoutes, { prefix: "/api/v1" });
   app.register(creativeRoutes, { prefix: "/api/v1" });
+  app.register(discoveryRoutes, { prefix: "/api/v1" });
+  app.register(ratingRoutes, { prefix: "/api/v1" });
 
   // Generate with tighter per-user rate limit
   if (!env.rateLimitDisabled) {
