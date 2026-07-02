@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { FastifyInstance } from "fastify";
 import { requireAuth, requireConsent } from "../auth/middleware.js";
+import { sendError } from "../http/errors.js";
 import {
   createChildProfile,
   listChildProfilesByGuardian,
@@ -33,9 +34,7 @@ export async function childProfileRoutes(
     async (request, reply) => {
       const parsed = CreateChildProfileSchema.safeParse(request.body);
       if (!parsed.success) {
-        return reply
-          .code(400)
-          .send({ error: "Invalid input", details: parsed.error.flatten() });
+        return sendError(reply, 400, "VALIDATION_ERROR", "Invalid input", parsed.error.flatten());
       }
       const { nickname, age_band, preferences } = parsed.data;
 
@@ -57,7 +56,7 @@ export async function childProfileRoutes(
       const { id } = request.params as { id: string };
       const profile = await getOwnedChildProfile(request.actor, id);
       if (!profile) {
-        return reply.code(404).send({ error: "Not found" });
+        return sendError(reply, 404, "NOT_FOUND", "Not found");
       }
       return reply.code(200).send(profile);
     },

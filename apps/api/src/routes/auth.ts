@@ -16,7 +16,13 @@ import {
 import { recordConsent } from "../repos/consent.js";
 import { createTrialSubscription } from "../repos/subscriptions.js";
 import { TRIAL_PLAN_ID } from "../db/seedConstants.js";
-import { requireAuth } from "../auth/middleware.js";
+import { requireAuth, suspendedMessage } from "../auth/middleware.js";
+import { sendError } from "../http/errors.js";
+
+/** Conta suspensa? (suspended_until no futuro) */
+function isSuspended(user: { suspendedUntil: Date | null }): boolean {
+  return !!user.suspendedUntil && user.suspendedUntil > new Date();
+}
 
 const REFRESH_TOKEN_TTL_DAYS = 7;
 
@@ -31,14 +37,14 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.post("/auth/register", async (request, reply) => {
     const parsed = RegisterInputSchema.safeParse(request.body);
     if (!parsed.success) {
-      return reply.code(400).send({ error: "Invalid input", details: parsed.error.flatten() });
+      return sendError(reply, 400, "VALIDATION_ERROR", "Invalid input", parsed.error.flatten());
     }
     const { name, email, password } = parsed.data;
 
     // Check for duplicate email
     const existing = await getUserByEmail(email);
     if (existing) {
-      return reply.code(409).send({ error: "Email already registered" });
+      return sendError(reply, 409, "CONFLICT", "Email already registered");
     }
 
     const passwordHash = await hashPassword(password);
@@ -68,18 +74,23 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.post("/auth/login", async (request, reply) => {
     const parsed = LoginInputSchema.safeParse(request.body);
     if (!parsed.success) {
-      return reply.code(400).send({ error: "Invalid input" });
+      return sendError(reply, 400, "VALIDATION_ERROR", "Invalid input");
     }
     const { email, password } = parsed.data;
 
     const user = await getUserByEmail(email);
     if (!user || user.deletedAt !== null) {
-      return reply.code(401).send({ error: "Invalid credentials" });
+      return sendError(reply, 401, "UNAUTHORIZED", "Invalid credentials");
     }
 
     const valid = await verifyPassword(user.passwordHash, password);
     if (!valid) {
-      return reply.code(401).send({ error: "Invalid credentials" });
+      return sendError(reply, 401, "UNAUTHORIZED", "Invalid credentials");
+    }
+
+    // Conta suspensa não pode iniciar sessão
+    if (isSuspended(user)) {
+      return sendError(reply, 403, "SUSPENDED", suspendedMessage(user.suspendedUntil!));
     }
 
     const accessToken = signAccess({ sub: user.id, role: user.role });
@@ -97,7 +108,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const body = request.body as { refresh_token?: string } | null;
     const token = body?.refresh_token;
     if (!token) {
-      return reply.code(400).send({ error: "refresh_token required" });
+      return sendError(reply, 400, "VALIDATION_ERROR", "refresh_token required");
     }
 
     // Verify JWT signature first
@@ -105,22 +116,27 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     try {
       payload = verifyRefresh(token);
     } catch {
-      return reply.code(401).send({ error: "Invalid refresh token" });
+      return sendError(reply, 401, "UNAUTHORIZED", "Invalid refresh token");
     }
 
     // Check token in DB (not revoked, not expired)
     const stored = await findValidRefreshToken(payload.sub, token);
     if (!stored) {
-      return reply.code(401).send({ error: "Token revoked or expired" });
+      return sendError(reply, 401, "UNAUTHORIZED", "Token revoked or expired");
     }
 
     // Revoke old token
     await revokeRefreshToken(stored.id);
 
-    // Get user
+    // Get user (getUserById já filtra deleted_at)
     const user = await getUserById(payload.sub);
     if (!user) {
-      return reply.code(401).send({ error: "User not found" });
+      return sendError(reply, 401, "UNAUTHORIZED", "User not found");
+    }
+
+    // Conta suspensa não pode renovar sessão
+    if (isSuspended(user)) {
+      return sendError(reply, 403, "SUSPENDED", suspendedMessage(user.suspendedUntil!));
     }
 
     // Issue new pair
@@ -142,14 +158,14 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       const body = request.body as { refresh_token?: string } | null;
       const token = body?.refresh_token;
       if (!token) {
-        return reply.code(400).send({ error: "refresh_token required" });
+        return sendError(reply, 400, "VALIDATION_ERROR", "refresh_token required");
       }
 
       let payload: { sub: string };
       try {
         payload = verifyRefresh(token);
       } catch {
-        return reply.code(400).send({ error: "Invalid refresh token" });
+        return sendError(reply, 400, "VALIDATION_ERROR", "Invalid refresh token");
       }
 
       const stored = await findValidRefreshToken(payload.sub, token);
@@ -168,7 +184,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const parsed = ConsentInputSchema.safeParse(request.body);
       if (!parsed.success) {
-        return reply.code(400).send({ error: "Invalid input", details: parsed.error.flatten() });
+        return sendError(reply, 400, "VALIDATION_ERROR", "Invalid input", parsed.error.flatten());
       }
       const { consent_type, policy_version, granted } = parsed.data;
       const ipAddress =

@@ -14,7 +14,7 @@ import { buildApp } from "../app.js";
 import { resetDb, seedUser } from "../test/db.js";
 import { signAccess } from "../auth/jwt.js";
 import { db } from "../db/client.js";
-import { universes, characters, themes, appSettings } from "../db/schema.js";
+import { universes, characters, themes, appSettings, consentRecords } from "../db/schema.js";
 
 const app = buildApp();
 
@@ -514,5 +514,61 @@ describe("GET /api/v1/me", () => {
       url: "/api/v1/me",
     });
     expect(res.statusCode).toBe(401);
+  });
+
+  it("has_parental_consent is false without consent record", async () => {
+    const user = await seedUser({ email: "noconsent@example.com" });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/me",
+      headers: authHeader(user.id, "USER"),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ has_parental_consent: boolean }>().has_parental_consent).toBe(false);
+  });
+
+  it("has_parental_consent is true after PARENTAL_DATA granted", async () => {
+    const user = await seedUser({ email: "consent@example.com" });
+    await db.insert(consentRecords).values({
+      userId: user.id,
+      consentType: "PARENTAL_DATA",
+      policyVersion: "1.0",
+      granted: true,
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/me",
+      headers: authHeader(user.id, "USER"),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ has_parental_consent: boolean }>().has_parental_consent).toBe(true);
+  });
+
+  it("has_parental_consent is false when the latest record revokes consent", async () => {
+    const user = await seedUser({ email: "revoked@example.com" });
+    const earlier = new Date(Date.now() - 60_000);
+    await db.insert(consentRecords).values({
+      userId: user.id,
+      consentType: "PARENTAL_DATA",
+      policyVersion: "1.0",
+      granted: true,
+      createdAt: earlier,
+    });
+    await db.insert(consentRecords).values({
+      userId: user.id,
+      consentType: "PARENTAL_DATA",
+      policyVersion: "1.0",
+      granted: false,
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/me",
+      headers: authHeader(user.id, "USER"),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ has_parental_consent: boolean }>().has_parental_consent).toBe(false);
   });
 });

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { requireAuth } from "../auth/middleware.js";
+import { sendError } from "../http/errors.js";
 import { getAppSettingsBySlug } from "../repos/appSettings.js";
 
 export async function configRoutes(app: FastifyInstance): Promise<void> {
@@ -19,7 +20,7 @@ export async function configRoutes(app: FastifyInstance): Promise<void> {
         (await getAppSettingsBySlug(slug)) ??
         (await getAppSettingsBySlug(fallbackSlug));
       if (!settings) {
-        return reply.code(503).send({ error: "App not configured" });
+        return sendError(reply, 503, "SERVICE_UNAVAILABLE", "App not configured");
       }
 
       const appMode = settings.appMode as "SINGLE" | "MULTI";

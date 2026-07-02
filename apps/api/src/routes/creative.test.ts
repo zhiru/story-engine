@@ -138,7 +138,13 @@ describe("POST /api/v1/universes — max_universes limit", () => {
       payload: { title: "Universe 2", description: "Second" },
     });
     expect(second.statusCode).toBe(403);
-    expect(second.json()).toMatchObject({ error: "Universe limit reached" });
+    // Envelope padrão (SDD §7): { error: { code, message, request_id } }
+    const errBody = second.json() as {
+      error: { code: string; message: string; request_id: string };
+    };
+    expect(errBody.error.code).toBe("QUOTA_EXCEEDED");
+    expect(errBody.error.message).toBe("Universe limit reached");
+    expect(errBody.error.request_id).toBeTruthy();
   });
 
   it("allows creation when no plan subscription (no limit enforced)", async () => {

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { requireAuth, requireRole } from "../../auth/middleware.js";
+import { sendError } from "../../http/errors.js";
 import { CreatePlanInputSchema, UpdatePlanInputSchema } from "@storygen/shared";
 import { db } from "../../db/client.js";
 import { plans, auditLogs } from "../../db/schema.js";
@@ -36,9 +37,7 @@ export async function adminPlanRoutes(app: FastifyInstance): Promise<void> {
 
       const parsed = CreatePlanInputSchema.safeParse(request.body);
       if (!parsed.success) {
-        return reply
-          .code(400)
-          .send({ error: "Invalid input", details: parsed.error.flatten() });
+        return sendError(reply, 400, "VALIDATION_ERROR", "Invalid input", parsed.error.flatten());
       }
 
       const [plan] = await db
@@ -77,9 +76,7 @@ export async function adminPlanRoutes(app: FastifyInstance): Promise<void> {
 
       const parsed = UpdatePlanInputSchema.safeParse(request.body);
       if (!parsed.success) {
-        return reply
-          .code(400)
-          .send({ error: "Invalid input", details: parsed.error.flatten() });
+        return sendError(reply, 400, "VALIDATION_ERROR", "Invalid input", parsed.error.flatten());
       }
 
       const [existing] = await db
@@ -89,7 +86,7 @@ export async function adminPlanRoutes(app: FastifyInstance): Promise<void> {
         .limit(1);
 
       if (!existing) {
-        return reply.code(404).send({ error: "Plan not found" });
+        return sendError(reply, 404, "NOT_FOUND", "Plan not found");
       }
 
       const [updated] = await db
@@ -128,7 +125,7 @@ export async function adminPlanRoutes(app: FastifyInstance): Promise<void> {
         .limit(1);
 
       if (!existing) {
-        return reply.code(404).send({ error: "Plan not found" });
+        return sendError(reply, 404, "NOT_FOUND", "Plan not found");
       }
 
       await db

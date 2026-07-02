@@ -4,6 +4,7 @@
  * If absent, all functions are no-ops so the app runs without a DSN.
  */
 import type { FastifyError, FastifyReply, FastifyRequest } from "fastify";
+import { AppError, codeForStatus, sendError } from "./http/errors.js";
 
 let sentryInitialized = false;
 
@@ -46,21 +47,34 @@ export function buildErrorHandler() {
   ) {
     captureError(err);
 
+    // Erros de aplicação tipados carregam status + código estável.
+    if (err instanceof AppError) {
+      return sendError(reply, err.statusCode, err.code, err.message);
+    }
+
     const statusCode = err.statusCode ?? 500;
 
     // Preserve rate-limit 429 responses that already have a body
     if (statusCode === 429) {
-      return reply.code(429).send({
-        error: { code: "RATE_LIMITED", message: err.message ?? "Too many requests" },
-      });
+      return sendError(
+        reply,
+        429,
+        "RATE_LIMITED",
+        err.message ?? "Too many requests",
+      );
     }
 
     if (statusCode >= 500) {
       console.error("[error]", err);
     }
 
-    return reply.code(statusCode).send({
-      error: { code: err.code ?? "INTERNAL_ERROR", message: err.message ?? "Internal server error" },
-    });
+    return sendError(
+      reply,
+      statusCode,
+      codeForStatus(statusCode),
+      statusCode >= 500
+        ? "Internal server error"
+        : (err.message ?? "Request error"),
+    );
   };
 }

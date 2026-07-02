@@ -15,7 +15,8 @@ export const env = {
   aiModel: process.env.AI_MODEL ?? "",
   // Rate limiting
   rateLimitDisabled: process.env.RATE_LIMIT_DISABLED === "true",
-  rateLimitGlobalMax: Number(process.env.RATE_LIMIT_GLOBAL_MAX ?? 120),
+  // SDD §7: 60 req/min por usuário
+  rateLimitGlobalMax: Number(process.env.RATE_LIMIT_GLOBAL_MAX ?? 60),
   rateLimitGlobalWindowMs: Number(process.env.RATE_LIMIT_GLOBAL_WINDOW_MS ?? 60000),
   rateLimitGenerateMax: Number(process.env.RATE_LIMIT_GENERATE_MAX ?? 10),
   rateLimitGenerateWindowMs: Number(process.env.RATE_LIMIT_GENERATE_WINDOW_MS ?? 60000),

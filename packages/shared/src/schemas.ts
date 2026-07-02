@@ -144,6 +144,9 @@ export const MeResponseSchema = z.object({
   id: z.string().uuid(),
   email: z.string().email(),
   role: z.enum(["USER", "MODERATOR", "ADMIN"]),
+  // Derivado no servidor: registro de consentimento PARENTAL_DATA mais
+  // recente com granted=true (SDD RF-02).
+  has_parental_consent: z.boolean(),
 });
 export type MeResponse = z.infer<typeof MeResponseSchema>;
 

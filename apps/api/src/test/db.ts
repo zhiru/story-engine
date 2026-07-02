@@ -14,6 +14,7 @@ export async function resetDb() {
 type SeedUserInput = {
   email: string;
   role?: "USER" | "MODERATOR" | "ADMIN";
+  suspendedUntil?: Date | null;
 };
 
 export async function seedUser(input: SeedUserInput) {
@@ -24,6 +25,7 @@ export async function seedUser(input: SeedUserInput) {
       email: input.email,
       passwordHash: "$argon2id$v=19$placeholder",
       role: input.role ?? "USER",
+      suspendedUntil: input.suspendedUntil ?? null,
     })
     .returning();
   if (!row) throw new Error("seedUser: insert returned no row");

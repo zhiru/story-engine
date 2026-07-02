@@ -6,6 +6,7 @@
 import type { FastifyInstance } from "fastify";
 import { requireAuth } from "../auth/middleware.js";
 import { eraseUser } from "../services/lgpdErasure.js";
+import { sendError } from "../http/errors.js";
 
 export async function userRoutes(app: FastifyInstance): Promise<void> {
   app.delete(
@@ -19,9 +20,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
       const isAdmin = actor.role === "ADMIN";
 
       if (!isSelf && !isAdmin) {
-        return reply.code(403).send({
-          error: { code: "FORBIDDEN", message: "Not allowed to erase this account." },
-        });
+        return sendError(reply, 403, "FORBIDDEN", "Not allowed to erase this account.");
       }
 
       try {
@@ -30,7 +29,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
       } catch (err) {
         const message = err instanceof Error ? err.message : "Erasure failed";
         if (message.includes("not found")) {
-          return reply.code(404).send({ error: { code: "NOT_FOUND", message } });
+          return sendError(reply, 404, "NOT_FOUND", message);
         }
         throw err;
       }

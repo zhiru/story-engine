@@ -17,14 +17,17 @@ beforeEach(async () => {
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
-async function seedUniverse(userId: string) {
+async function seedUniverse(
+  userId: string,
+  visibility: "PUBLIC" | "PRIVATE" | "PAID" = "PUBLIC",
+) {
   const [row] = await db
     .insert(universes)
     .values({
       userId,
       title: "Test Universe",
       description: "A test universe",
-      visibility: "PUBLIC",
+      visibility,
     })
     .returning();
   return row!;
@@ -133,6 +136,103 @@ describe("GET /api/v1/universes/:id/stories", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toHaveLength(0);
+  });
+
+  it("returns 404 for non-existent universe", async () => {
+    const user = await seedUser({ email: "user@x.com" });
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/universes/00000000-0000-0000-0000-000000000001/stories",
+      headers: bearerHeader(user.id),
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error.code).toBe("NOT_FOUND");
+  });
+
+  // ── Autorização por universo (SDD §6.4) ────────────────────────────────────
+
+  it("denies a stranger listing stories of a PRIVATE universe (403)", async () => {
+    const owner = await seedUser({ email: "owner@x.com" });
+    const stranger = await seedUser({ email: "stranger@x.com" });
+    const universe = await seedUniverse(owner.id, "PRIVATE");
+    await seedStory(universe.id, owner.id, "APPROVED");
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/universes/${universe.id}/stories`,
+      headers: bearerHeader(stranger.id),
+    });
+
+    expect(res.statusCode).toBe(403);
+    const body = res.json() as {
+      error: { code: string; request_id: string };
+    };
+    expect(body.error.code).toBe("FORBIDDEN");
+    expect(body.error.request_id).toBeTruthy();
+  });
+
+  it("owner can list stories of their PRIVATE universe", async () => {
+    const owner = await seedUser({ email: "owner@x.com" });
+    const universe = await seedUniverse(owner.id, "PRIVATE");
+    await seedStory(universe.id, owner.id, "APPROVED");
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/universes/${universe.id}/stories`,
+      headers: bearerHeader(owner.id),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toHaveLength(1);
+  });
+
+  it("ADMIN can list stories of another user's PRIVATE universe", async () => {
+    const owner = await seedUser({ email: "owner@x.com" });
+    const admin = await seedUser({ email: "admin@x.com", role: "ADMIN" });
+    const universe = await seedUniverse(owner.id, "PRIVATE");
+    await seedStory(universe.id, owner.id, "APPROVED");
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/universes/${universe.id}/stories`,
+      headers: bearerHeader(admin.id, "ADMIN"),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toHaveLength(1);
+  });
+
+  it("any authenticated user can list stories of a PUBLIC universe", async () => {
+    const owner = await seedUser({ email: "owner@x.com" });
+    const stranger = await seedUser({ email: "stranger@x.com" });
+    const universe = await seedUniverse(owner.id, "PUBLIC");
+    await seedStory(universe.id, owner.id, "APPROVED");
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/universes/${universe.id}/stories`,
+      headers: bearerHeader(stranger.id),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toHaveLength(1);
+  });
+
+  it("stranger can list stories of the app's single-mode PRIVATE universe", async () => {
+    const owner = await seedUser({ email: "owner@x.com" });
+    const stranger = await seedUser({ email: "stranger@x.com" });
+    const universe = await seedUniverse(owner.id, "PRIVATE");
+    await seedSettings(universe.id); // app "test-app" com singleModeUniverseId
+    await seedStory(universe.id, owner.id, "APPROVED");
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/universes/${universe.id}/stories`,
+      headers: { ...bearerHeader(stranger.id), "x-app-slug": "test-app" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toHaveLength(1);
   });
 });
 

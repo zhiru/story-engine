@@ -8,6 +8,7 @@ import {
   UpdateThemeInputSchema,
 } from "@storygen/shared";
 import { requireAuth } from "../auth/middleware.js";
+import { sendError } from "../http/errors.js";
 import { createUniverse } from "../repos/universes.js";
 import { getActivePlan } from "../repos/plans.js";
 import { countUserUniverses, recordUsage } from "../repos/usage.js";
@@ -53,14 +54,12 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
       const isPrivileged =
         actor.role === "ADMIN" || actor.role === "MODERATOR";
       if (!isPrivileged && appMode !== "MULTI") {
-        return reply.code(403).send({ error: "Forbidden" });
+        return sendError(reply, 403, "FORBIDDEN", "Forbidden");
       }
 
       const parsed = CreateUniverseInputSchema.safeParse(request.body);
       if (!parsed.success) {
-        return reply
-          .code(400)
-          .send({ error: "Invalid input", details: parsed.error.flatten() });
+        return sendError(reply, 400, "VALIDATION_ERROR", "Invalid input", parsed.error.flatten());
       }
 
       // Enforce max_universes limit
@@ -68,10 +67,13 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
       if (plan) {
         const current = await countUserUniverses(actor.id);
         if (current >= plan.maxUniverses) {
-          return reply.code(403).send({
-            error: "Universe limit reached",
-            limit: plan.maxUniverses,
-          });
+          return sendError(
+            reply,
+            403,
+            "QUOTA_EXCEEDED",
+            "Universe limit reached",
+            { limit: plan.maxUniverses },
+          );
         }
       }
 
@@ -126,7 +128,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
 
       if (!isPrivileged) {
         if (appMode !== "MULTI") {
-          return reply.code(403).send({ error: "Forbidden" });
+          return sendError(reply, 403, "FORBIDDEN", "Forbidden");
         }
         // In MULTI, check universe ownership
         const access = await assertUniverseAccess(
@@ -135,18 +137,16 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
           actor.role,
         );
         if (access === null) {
-          return reply.code(404).send({ error: "Universe not found" });
+          return sendError(reply, 404, "NOT_FOUND", "Universe not found");
         }
         if (access === false) {
-          return reply.code(403).send({ error: "Forbidden" });
+          return sendError(reply, 403, "FORBIDDEN", "Forbidden");
         }
       }
 
       const parsed = CreateCharacterInputSchema.safeParse(request.body);
       if (!parsed.success) {
-        return reply
-          .code(400)
-          .send({ error: "Invalid input", details: parsed.error.flatten() });
+        return sendError(reply, 400, "VALIDATION_ERROR", "Invalid input", parsed.error.flatten());
       }
 
       const [character] = await db
@@ -183,7 +183,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
 
       if (!isPrivileged) {
         if (appMode !== "MULTI") {
-          return reply.code(403).send({ error: "Forbidden" });
+          return sendError(reply, 403, "FORBIDDEN", "Forbidden");
         }
         const access = await assertUniverseAccess(
           universeId,
@@ -191,18 +191,16 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
           actor.role,
         );
         if (access === null) {
-          return reply.code(404).send({ error: "Universe not found" });
+          return sendError(reply, 404, "NOT_FOUND", "Universe not found");
         }
         if (access === false) {
-          return reply.code(403).send({ error: "Forbidden" });
+          return sendError(reply, 403, "FORBIDDEN", "Forbidden");
         }
       }
 
       const parsed = CreateThemeInputSchema.safeParse(request.body);
       if (!parsed.success) {
-        return reply
-          .code(400)
-          .send({ error: "Invalid input", details: parsed.error.flatten() });
+        return sendError(reply, 400, "VALIDATION_ERROR", "Invalid input", parsed.error.flatten());
       }
 
       const [theme] = await db
@@ -236,7 +234,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
 
       if (!isPrivileged) {
         if (appMode !== "MULTI") {
-          return reply.code(403).send({ error: "Forbidden" });
+          return sendError(reply, 403, "FORBIDDEN", "Forbidden");
         }
         const access = await assertUniverseAccess(
           universeId,
@@ -244,18 +242,16 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
           actor.role,
         );
         if (access === null) {
-          return reply.code(404).send({ error: "Universe not found" });
+          return sendError(reply, 404, "NOT_FOUND", "Universe not found");
         }
         if (access === false) {
-          return reply.code(403).send({ error: "Forbidden" });
+          return sendError(reply, 403, "FORBIDDEN", "Forbidden");
         }
       }
 
       const parsed = CreateStoryArcInputSchema.safeParse(request.body);
       if (!parsed.success) {
-        return reply
-          .code(400)
-          .send({ error: "Invalid input", details: parsed.error.flatten() });
+        return sendError(reply, 400, "VALIDATION_ERROR", "Invalid input", parsed.error.flatten());
       }
 
       const [arc] = await db
@@ -289,15 +285,15 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
 
       if (!isPrivileged) {
         if (appMode !== "MULTI") {
-          return reply.code(403).send({ error: "Forbidden" });
+          return sendError(reply, 403, "FORBIDDEN", "Forbidden");
         }
         const access = await assertUniverseAccess(universeId, actor.id, actor.role);
-        if (access === null) return reply.code(404).send({ error: "Universe not found" });
-        if (access === false) return reply.code(403).send({ error: "Forbidden" });
+        if (access === null) return sendError(reply, 404, "NOT_FOUND", "Universe not found");
+        if (access === false) return sendError(reply, 403, "FORBIDDEN", "Forbidden");
       } else {
         // Privileged: still confirm universe exists
         const access = await assertUniverseAccess(universeId, actor.id, actor.role);
-        if (access === null) return reply.code(404).send({ error: "Universe not found" });
+        if (access === null) return sendError(reply, 404, "NOT_FOUND", "Universe not found");
       }
 
       const rows = await db
@@ -325,18 +321,18 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
       const isPrivileged = actor.role === "ADMIN" || actor.role === "MODERATOR";
 
       if (!isPrivileged) {
-        if (appMode !== "MULTI") return reply.code(403).send({ error: "Forbidden" });
+        if (appMode !== "MULTI") return sendError(reply, 403, "FORBIDDEN", "Forbidden");
         const access = await assertUniverseAccess(universeId, actor.id, actor.role);
-        if (access === null) return reply.code(404).send({ error: "Universe not found" });
-        if (access === false) return reply.code(403).send({ error: "Forbidden" });
+        if (access === null) return sendError(reply, 404, "NOT_FOUND", "Universe not found");
+        if (access === false) return sendError(reply, 403, "FORBIDDEN", "Forbidden");
       } else {
         const access = await assertUniverseAccess(universeId, actor.id, actor.role);
-        if (access === null) return reply.code(404).send({ error: "Universe not found" });
+        if (access === null) return sendError(reply, 404, "NOT_FOUND", "Universe not found");
       }
 
       const parsed = UpdateCharacterInputSchema.safeParse(request.body);
       if (!parsed.success) {
-        return reply.code(400).send({ error: "Invalid input", details: parsed.error.flatten() });
+        return sendError(reply, 400, "VALIDATION_ERROR", "Invalid input", parsed.error.flatten());
       }
 
       const [existing] = await db
@@ -345,7 +341,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
         .where(and(eq(characters.id, cid), eq(characters.universeId, universeId), isNull(characters.deletedAt)))
         .limit(1);
 
-      if (!existing) return reply.code(404).send({ error: "Character not found" });
+      if (!existing) return sendError(reply, 404, "NOT_FOUND", "Character not found");
 
       const [updated] = await db
         .update(characters)
@@ -372,13 +368,13 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
       const isPrivileged = actor.role === "ADMIN" || actor.role === "MODERATOR";
 
       if (!isPrivileged) {
-        if (appMode !== "MULTI") return reply.code(403).send({ error: "Forbidden" });
+        if (appMode !== "MULTI") return sendError(reply, 403, "FORBIDDEN", "Forbidden");
         const access = await assertUniverseAccess(universeId, actor.id, actor.role);
-        if (access === null) return reply.code(404).send({ error: "Universe not found" });
-        if (access === false) return reply.code(403).send({ error: "Forbidden" });
+        if (access === null) return sendError(reply, 404, "NOT_FOUND", "Universe not found");
+        if (access === false) return sendError(reply, 403, "FORBIDDEN", "Forbidden");
       } else {
         const access = await assertUniverseAccess(universeId, actor.id, actor.role);
-        if (access === null) return reply.code(404).send({ error: "Universe not found" });
+        if (access === null) return sendError(reply, 404, "NOT_FOUND", "Universe not found");
       }
 
       const [existing] = await db
@@ -387,7 +383,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
         .where(and(eq(characters.id, cid), eq(characters.universeId, universeId), isNull(characters.deletedAt)))
         .limit(1);
 
-      if (!existing) return reply.code(404).send({ error: "Character not found" });
+      if (!existing) return sendError(reply, 404, "NOT_FOUND", "Character not found");
 
       await db
         .update(characters)
@@ -415,13 +411,13 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
       const isPrivileged = actor.role === "ADMIN" || actor.role === "MODERATOR";
 
       if (!isPrivileged) {
-        if (appMode !== "MULTI") return reply.code(403).send({ error: "Forbidden" });
+        if (appMode !== "MULTI") return sendError(reply, 403, "FORBIDDEN", "Forbidden");
         const access = await assertUniverseAccess(universeId, actor.id, actor.role);
-        if (access === null) return reply.code(404).send({ error: "Universe not found" });
-        if (access === false) return reply.code(403).send({ error: "Forbidden" });
+        if (access === null) return sendError(reply, 404, "NOT_FOUND", "Universe not found");
+        if (access === false) return sendError(reply, 403, "FORBIDDEN", "Forbidden");
       } else {
         const access = await assertUniverseAccess(universeId, actor.id, actor.role);
-        if (access === null) return reply.code(404).send({ error: "Universe not found" });
+        if (access === null) return sendError(reply, 404, "NOT_FOUND", "Universe not found");
       }
 
       const rows = await db
@@ -449,18 +445,18 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
       const isPrivileged = actor.role === "ADMIN" || actor.role === "MODERATOR";
 
       if (!isPrivileged) {
-        if (appMode !== "MULTI") return reply.code(403).send({ error: "Forbidden" });
+        if (appMode !== "MULTI") return sendError(reply, 403, "FORBIDDEN", "Forbidden");
         const access = await assertUniverseAccess(universeId, actor.id, actor.role);
-        if (access === null) return reply.code(404).send({ error: "Universe not found" });
-        if (access === false) return reply.code(403).send({ error: "Forbidden" });
+        if (access === null) return sendError(reply, 404, "NOT_FOUND", "Universe not found");
+        if (access === false) return sendError(reply, 403, "FORBIDDEN", "Forbidden");
       } else {
         const access = await assertUniverseAccess(universeId, actor.id, actor.role);
-        if (access === null) return reply.code(404).send({ error: "Universe not found" });
+        if (access === null) return sendError(reply, 404, "NOT_FOUND", "Universe not found");
       }
 
       const parsed = UpdateThemeInputSchema.safeParse(request.body);
       if (!parsed.success) {
-        return reply.code(400).send({ error: "Invalid input", details: parsed.error.flatten() });
+        return sendError(reply, 400, "VALIDATION_ERROR", "Invalid input", parsed.error.flatten());
       }
 
       const [existing] = await db
@@ -469,7 +465,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
         .where(and(eq(themes.id, tid), eq(themes.universeId, universeId), isNull(themes.deletedAt)))
         .limit(1);
 
-      if (!existing) return reply.code(404).send({ error: "Theme not found" });
+      if (!existing) return sendError(reply, 404, "NOT_FOUND", "Theme not found");
 
       const [updated] = await db
         .update(themes)
@@ -496,13 +492,13 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
       const isPrivileged = actor.role === "ADMIN" || actor.role === "MODERATOR";
 
       if (!isPrivileged) {
-        if (appMode !== "MULTI") return reply.code(403).send({ error: "Forbidden" });
+        if (appMode !== "MULTI") return sendError(reply, 403, "FORBIDDEN", "Forbidden");
         const access = await assertUniverseAccess(universeId, actor.id, actor.role);
-        if (access === null) return reply.code(404).send({ error: "Universe not found" });
-        if (access === false) return reply.code(403).send({ error: "Forbidden" });
+        if (access === null) return sendError(reply, 404, "NOT_FOUND", "Universe not found");
+        if (access === false) return sendError(reply, 403, "FORBIDDEN", "Forbidden");
       } else {
         const access = await assertUniverseAccess(universeId, actor.id, actor.role);
-        if (access === null) return reply.code(404).send({ error: "Universe not found" });
+        if (access === null) return sendError(reply, 404, "NOT_FOUND", "Universe not found");
       }
 
       const [existing] = await db
@@ -511,7 +507,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
         .where(and(eq(themes.id, tid), eq(themes.universeId, universeId), isNull(themes.deletedAt)))
         .limit(1);
 
-      if (!existing) return reply.code(404).send({ error: "Theme not found" });
+      if (!existing) return sendError(reply, 404, "NOT_FOUND", "Theme not found");
 
       await db
         .update(themes)

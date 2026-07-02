@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { requireAuth, requireRole } from "../../auth/middleware.js";
+import { sendError } from "../../http/errors.js";
 import { CreateReportInputSchema, UpdateReportInputSchema } from "@storygen/shared";
 import { db } from "../../db/client.js";
 import { reports, auditLogs, stories } from "../../db/schema.js";
@@ -18,9 +19,7 @@ export async function reportRoutes(app: FastifyInstance): Promise<void> {
 
       const parsed = CreateReportInputSchema.safeParse(request.body);
       if (!parsed.success) {
-        return reply
-          .code(400)
-          .send({ error: "Invalid input", details: parsed.error.flatten() });
+        return sendError(reply, 400, "VALIDATION_ERROR", "Invalid input", parsed.error.flatten());
       }
 
       const [report] = await db
@@ -60,7 +59,7 @@ export async function reportRoutes(app: FastifyInstance): Promise<void> {
       if (status) {
         const validStatuses = ["OPEN", "REVIEWING", "ACTIONED", "DISMISSED"];
         if (!validStatuses.includes(status)) {
-          return reply.code(400).send({ error: "Invalid status filter" });
+          return sendError(reply, 400, "VALIDATION_ERROR", "Invalid status filter");
         }
         conditions.push(eq(reports.status, status as "OPEN" | "REVIEWING" | "ACTIONED" | "DISMISSED"));
       }
@@ -90,9 +89,7 @@ export async function reportRoutes(app: FastifyInstance): Promise<void> {
 
       const parsed = UpdateReportInputSchema.safeParse(request.body);
       if (!parsed.success) {
-        return reply
-          .code(400)
-          .send({ error: "Invalid input", details: parsed.error.flatten() });
+        return sendError(reply, 400, "VALIDATION_ERROR", "Invalid input", parsed.error.flatten());
       }
 
       const [existing] = await db
@@ -102,7 +99,7 @@ export async function reportRoutes(app: FastifyInstance): Promise<void> {
         .limit(1);
 
       if (!existing) {
-        return reply.code(404).send({ error: "Report not found" });
+        return sendError(reply, 404, "NOT_FOUND", "Report not found");
       }
 
       const updateData: Record<string, unknown> = {

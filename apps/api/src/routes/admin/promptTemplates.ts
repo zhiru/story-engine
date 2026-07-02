@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { requireAuth, requireRole } from "../../auth/middleware.js";
+import { sendError } from "../../http/errors.js";
 import { CreatePromptTemplateInputSchema, UpdatePromptTemplateInputSchema } from "@storygen/shared";
 import { db } from "../../db/client.js";
 import { promptTemplates, auditLogs, aiProviders } from "../../db/schema.js";
@@ -37,9 +38,7 @@ export async function adminPromptTemplateRoutes(app: FastifyInstance): Promise<v
 
       const parsed = CreatePromptTemplateInputSchema.safeParse(request.body);
       if (!parsed.success) {
-        return reply
-          .code(400)
-          .send({ error: "Invalid input", details: parsed.error.flatten() });
+        return sendError(reply, 400, "VALIDATION_ERROR", "Invalid input", parsed.error.flatten());
       }
 
       // Verify the AI provider exists
@@ -50,7 +49,7 @@ export async function adminPromptTemplateRoutes(app: FastifyInstance): Promise<v
         .limit(1);
 
       if (!provider) {
-        return reply.code(404).send({ error: "AI provider not found" });
+        return sendError(reply, 404, "NOT_FOUND", "AI provider not found");
       }
 
       // Determine next version number for this provider
@@ -111,9 +110,7 @@ export async function adminPromptTemplateRoutes(app: FastifyInstance): Promise<v
 
       const parsed = UpdatePromptTemplateInputSchema.safeParse(request.body);
       if (!parsed.success) {
-        return reply
-          .code(400)
-          .send({ error: "Invalid input", details: parsed.error.flatten() });
+        return sendError(reply, 400, "VALIDATION_ERROR", "Invalid input", parsed.error.flatten());
       }
 
       const [existing] = await db
@@ -123,7 +120,7 @@ export async function adminPromptTemplateRoutes(app: FastifyInstance): Promise<v
         .limit(1);
 
       if (!existing) {
-        return reply.code(404).send({ error: "Prompt template not found" });
+        return sendError(reply, 404, "NOT_FOUND", "Prompt template not found");
       }
 
       const updateData: Record<string, unknown> = { updatedAt: new Date() };

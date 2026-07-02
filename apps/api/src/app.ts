@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import Fastify from "fastify";
+import { createHash, randomUUID } from "node:crypto";
+import Fastify, { type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import { sql } from "drizzle-orm";
@@ -23,6 +23,20 @@ import { adminCostRoutes } from "./routes/admin/cost.js";
 import { resolveAppContext } from "./auth/appContext.js";
 import { env } from "./env.js";
 import { buildErrorHandler } from "./observability.js";
+import { errorEnvelope } from "./http/errors.js";
+
+/**
+ * Chave do rate limit global: por usuário (SDD §7). O hook do rate limit roda
+ * antes do requireAuth, então derivamos a chave do próprio Bearer token
+ * (sha256) e caímos para o IP quando não há Authorization.
+ */
+function rateLimitKey(request: FastifyRequest): string {
+  const auth = request.headers.authorization;
+  if (auth && auth.startsWith("Bearer ")) {
+    return createHash("sha256").update(auth.slice(7)).digest("hex");
+  }
+  return request.ip;
+}
 
 export function buildApp(opts?: { disableLogger?: boolean }) {
   const useLogger = !opts?.disableLogger && process.env.NODE_ENV !== "test";
@@ -45,18 +59,19 @@ export function buildApp(opts?: { disableLogger?: boolean }) {
   // CORS: dev permite o app web (Expo :8081) chamar a API (:3000).
   app.register(cors, { origin: true });
 
-  // Rate limiting (global)
+  // Rate limiting (global) — 60 req/min por usuário (SDD §7)
   if (!env.rateLimitDisabled) {
     app.register(rateLimit, {
       global: true,
       max: env.rateLimitGlobalMax,
       timeWindow: env.rateLimitGlobalWindowMs,
-      errorResponseBuilder: (_request, context) => ({
-        error: {
-          code: "RATE_LIMITED",
-          message: `Rate limit exceeded. Max ${context.max} requests per ${context.after}.`,
-        },
-      }),
+      keyGenerator: rateLimitKey,
+      errorResponseBuilder: (request, context) =>
+        errorEnvelope(
+          "RATE_LIMITED",
+          `Rate limit exceeded. Max ${context.max} requests per ${context.after}.`,
+          request.id,
+        ),
     });
   }
 
@@ -109,15 +124,18 @@ export function buildApp(opts?: { disableLogger?: boolean }) {
           max: env.rateLimitGenerateMax,
           timeWindow: env.rateLimitGenerateWindowMs,
           keyGenerator: (request) => {
-            // Prefer actor id (set by requireAuth), fall back to IP
-            return (request as { actor?: { id: string } }).actor?.id ?? request.ip;
+            // Prefer actor id (set by requireAuth), fall back to token/IP
+            return (
+              (request as { actor?: { id: string } }).actor?.id ??
+              rateLimitKey(request)
+            );
           },
-          errorResponseBuilder: (_request, context) => ({
-            error: {
-              code: "RATE_LIMITED",
-              message: `Story generation rate limit exceeded. Max ${context.max} per ${context.after}.`,
-            },
-          }),
+          errorResponseBuilder: (request, context) =>
+            errorEnvelope(
+              "RATE_LIMITED",
+              `Story generation rate limit exceeded. Max ${context.max} per ${context.after}.`,
+              request.id,
+            ),
         });
         await fastify.register(generateRoutes);
       },

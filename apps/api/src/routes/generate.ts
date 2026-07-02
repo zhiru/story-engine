@@ -8,6 +8,7 @@ import type { FastifyInstance } from "fastify";
 import { GenerateStoryInputSchema } from "@storygen/shared";
 import { requireAuth, requireConsent } from "../auth/middleware.js";
 import { generateStory, GenerationError } from "../services/generateStory.js";
+import { sendError } from "../http/errors.js";
 
 export async function generateRoutes(app: FastifyInstance): Promise<void> {
   app.post(
@@ -16,13 +17,13 @@ export async function generateRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const parsed = GenerateStoryInputSchema.safeParse(request.body);
       if (!parsed.success) {
-        return reply.code(400).send({
-          error: {
-            code: "INVALID_INPUT",
-            message: "Dados inválidos.",
-            details: parsed.error.flatten(),
-          },
-        });
+        return sendError(
+          reply,
+          400,
+          "VALIDATION_ERROR",
+          "Dados inválidos.",
+          parsed.error.flatten(),
+        );
       }
 
       try {
@@ -41,18 +42,16 @@ export async function generateRoutes(app: FastifyInstance): Promise<void> {
             UNIVERSE_ACCESS_DENIED: 403,
           };
           const status = statusMap[err.code] ?? 500;
-          return reply.code(status).send({
-            error: { code: err.code, message: err.message },
-          });
+          return sendError(reply, status, err.code, err.message);
         }
         // Unexpected error
         console.error("Unexpected error in /stories/generate:", err);
-        return reply.code(503).send({
-          error: {
-            code: "GENERATION_FAILED",
-            message: "Erro inesperado. Tente novamente.",
-          },
-        });
+        return sendError(
+          reply,
+          503,
+          "GENERATION_FAILED",
+          "Erro inesperado. Tente novamente.",
+        );
       }
     },
   );

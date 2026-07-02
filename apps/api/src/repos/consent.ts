@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { consentRecords } from "../db/schema.js";
 
@@ -39,4 +39,26 @@ export async function hasParentalConsent(
     )
     .limit(1);
   return !!row;
+}
+
+/**
+ * Consentimento parental derivado no servidor (para GET /me):
+ * true se o registro PARENTAL_DATA mais recente do usuário tem granted=true
+ * (uma revogação posterior — granted=false — desliga o consentimento).
+ */
+export async function hasParentalConsentLatest(
+  userId: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ granted: consentRecords.granted })
+    .from(consentRecords)
+    .where(
+      and(
+        eq(consentRecords.userId, userId),
+        eq(consentRecords.consentType, "PARENTAL_DATA"),
+      ),
+    )
+    .orderBy(desc(consentRecords.createdAt))
+    .limit(1);
+  return row?.granted === true;
 }
