@@ -591,6 +591,9 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
   /**
    * GET /api/v1/universes/:id/characters
    * List non-deleted characters ordered by createdAt.
+   * Leitura herda a regra do universo pai (canReadUniverse — SDD §6.4): dono,
+   * admin/mod, PUBLIC, ou o universo do modo SINGLE. Assim um USER em SINGLE
+   * consegue listar os personagens do universo do app para gerar histórias.
    */
   app.get(
     "/universes/:id/characters",
@@ -598,21 +601,13 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id: universeId } = request.params as { id: string };
       const actor = request.actor;
-      const appMode = request.appMode;
 
-      const isPrivileged = actor.role === "ADMIN" || actor.role === "MODERATOR";
-
-      if (!isPrivileged) {
-        if (appMode !== "MULTI") {
-          return sendError(reply, 403, "FORBIDDEN", "Forbidden");
-        }
-        const access = await assertUniverseAccess(universeId, actor.id, actor.role);
-        if (access === null) return sendError(reply, 404, "NOT_FOUND", "Universe not found");
-        if (access === false) return sendError(reply, 403, "FORBIDDEN", "Forbidden");
-      } else {
-        // Privileged: still confirm universe exists
-        const access = await assertUniverseAccess(universeId, actor.id, actor.role);
-        if (access === null) return sendError(reply, 404, "NOT_FOUND", "Universe not found");
+      const universe = await getUniverseById(universeId);
+      if (!universe) {
+        return sendError(reply, 404, "NOT_FOUND", "Universe not found");
+      }
+      if (!canReadUniverse(actor, universe, request.singleModeUniverseId)) {
+        return sendError(reply, 403, "FORBIDDEN", "Forbidden");
       }
 
       const rows = await db
@@ -723,6 +718,9 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
   /**
    * GET /api/v1/universes/:id/themes
    * List non-deleted themes ordered by createdAt.
+   * Leitura herda a regra do universo pai (canReadUniverse — SDD §6.4): dono,
+   * admin/mod, PUBLIC, ou o universo do modo SINGLE. Assim um USER em SINGLE
+   * consegue listar os temas do universo do app para gerar histórias.
    */
   app.get(
     "/universes/:id/themes",
@@ -730,18 +728,13 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id: universeId } = request.params as { id: string };
       const actor = request.actor;
-      const appMode = request.appMode;
 
-      const isPrivileged = actor.role === "ADMIN" || actor.role === "MODERATOR";
-
-      if (!isPrivileged) {
-        if (appMode !== "MULTI") return sendError(reply, 403, "FORBIDDEN", "Forbidden");
-        const access = await assertUniverseAccess(universeId, actor.id, actor.role);
-        if (access === null) return sendError(reply, 404, "NOT_FOUND", "Universe not found");
-        if (access === false) return sendError(reply, 403, "FORBIDDEN", "Forbidden");
-      } else {
-        const access = await assertUniverseAccess(universeId, actor.id, actor.role);
-        if (access === null) return sendError(reply, 404, "NOT_FOUND", "Universe not found");
+      const universe = await getUniverseById(universeId);
+      if (!universe) {
+        return sendError(reply, 404, "NOT_FOUND", "Universe not found");
+      }
+      if (!canReadUniverse(actor, universe, request.singleModeUniverseId)) {
+        return sendError(reply, 403, "FORBIDDEN", "Forbidden");
       }
 
       const rows = await db

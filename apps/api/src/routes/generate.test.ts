@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
+import { eq } from "drizzle-orm";
 import { buildApp } from "../app.js";
 import { resetDb, seedUser } from "../test/db.js";
 import { signAccess } from "../auth/jwt.js";
@@ -68,6 +69,20 @@ async function seedConsent(userId: string) {
     granted: true,
     ipAddress: "127.0.0.1",
   });
+}
+
+/** Assinatura com status/período customizados (para casos de acesso residual). */
+async function seedSubscriptionWith(
+  userId: string,
+  planId: string,
+  status: "ACTIVE" | "PAST_DUE" | "CANCELED" | "EXPIRED",
+  currentPeriodEnd: Date,
+) {
+  const [row] = await db
+    .insert(subscriptions)
+    .values({ userId, planId, status, store: "STRIPE", currentPeriodEnd })
+    .returning();
+  return row!;
 }
 
 async function seedUniverse(userId: string) {
@@ -489,5 +504,163 @@ describe("POST /api/v1/stories/generate", () => {
     });
 
     expect(res.statusCode).toBe(400);
+  });
+
+  // ── IDOR cross-tenant: story_arc_id de outro universo (finding 2) ──────────
+
+  it("rejects a story_arc_id from another universe and leaves that arc untouched", async () => {
+    const { user, universe } = await seedFullEnv();
+
+    // Universo B de OUTRO usuário, com um arco próprio
+    const otherUser = await seedUser({ email: "arc-owner@test.com" });
+    const universeB = await seedUniverse(otherUser.id);
+    const arcB = await seedStoryArc(universeB.id);
+    expect(arcB.version).toBe(1);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/stories/generate",
+      headers: bearerHeader(user.id),
+      payload: { universe_id: universe.id, story_arc_id: arcB.id },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe("UNIVERSE_ACCESS_DENIED");
+
+    // O arco alheio permanece intacto (summary/version) — sem corrupção
+    const [arcAfter] = await db
+      .select()
+      .from(storyArcs)
+      .where(eq(storyArcs.id, arcB.id));
+    expect(arcAfter!.version).toBe(1);
+    expect(arcAfter!.summary).toBe("A aventura começou no bosque.");
+
+    // Nada persistido no universo do atacante, quota preservada
+    expect((await db.select().from(stories)).length).toBe(0);
+    expect((await db.select().from(usageRecords)).length).toBe(0);
+  });
+
+  // ── IDOR cross-universe: theme_id de outro universo (finding 3) ────────────
+
+  it("rejects a theme_id that belongs to another universe (THEME_NOT_FOUND)", async () => {
+    const { user, universe } = await seedFullEnv();
+
+    const otherUser = await seedUser({ email: "theme-owner@test.com" });
+    const universeB = await seedUniverse(otherUser.id);
+    const foreignTheme = await seedTheme(universeB.id);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/stories/generate",
+      headers: bearerHeader(user.id),
+      payload: { universe_id: universe.id, theme_id: foreignTheme.id },
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error.code).toBe("THEME_NOT_FOUND");
+
+    // Nada persistido, quota preservada
+    expect((await db.select().from(stories)).length).toBe(0);
+    expect((await db.select().from(usageRecords)).length).toBe(0);
+  });
+
+  it("accepts a theme_id that belongs to the target universe", async () => {
+    const user = await seedUser({ email: "own-theme@test.com" });
+    await seedConsent(user.id);
+    const plan = await seedPlan();
+    await seedActiveSubscription(user.id, plan.id);
+    const universe = await seedUniverse(user.id);
+    await seedCharacters(universe.id);
+    const theme = await seedTheme(universe.id);
+    const aiProvider = await seedAiProvider();
+    await seedPromptTemplate(aiProvider.id, user.id);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/stories/generate",
+      headers: bearerHeader(user.id),
+      payload: { universe_id: universe.id, theme_id: theme.id },
+    });
+
+    expect(res.statusCode).toBe(201);
+    const [dbStory] = await db.select().from(stories).limit(1);
+    expect(dbStory!.themeId).toBe(theme.id);
+  });
+
+  // ── Acesso residual da assinatura no gate de geração (finding 5) ───────────
+
+  it("PAST_DUE subscription within the grace period can still generate", async () => {
+    const user = await seedUser({ email: "pastdue-gen@test.com" });
+    await seedConsent(user.id);
+    const plan = await seedPlan();
+    const future = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+    await seedSubscriptionWith(user.id, plan.id, "PAST_DUE", future);
+    const universe = await seedUniverse(user.id);
+    await seedCharacters(universe.id);
+    await seedTheme(universe.id);
+    const aiProvider = await seedAiProvider();
+    await seedPromptTemplate(aiProvider.id, user.id);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/stories/generate",
+      headers: bearerHeader(user.id),
+      payload: { universe_id: universe.id },
+    });
+
+    expect(res.statusCode).toBe(201);
+  });
+
+  it("EXPIRED subscription cannot generate (403 NO_ACTIVE_SUBSCRIPTION)", async () => {
+    const user = await seedUser({ email: "expired-gen@test.com" });
+    await seedConsent(user.id);
+    const plan = await seedPlan();
+    // EXPIRED, mesmo com período no futuro, nunca concede acesso
+    const future = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    await seedSubscriptionWith(user.id, plan.id, "EXPIRED", future);
+    const universe = await seedUniverse(user.id);
+    await seedCharacters(universe.id);
+    await seedTheme(universe.id);
+    const aiProvider = await seedAiProvider();
+    await seedPromptTemplate(aiProvider.id, user.id);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/stories/generate",
+      headers: bearerHeader(user.id),
+      payload: { universe_id: universe.id },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe("NO_ACTIVE_SUBSCRIPTION");
+  });
+
+  // ── Quota TOCTOU: gerações concorrentes não estouram maxStoriesPerMonth (finding 7) ──
+
+  it("concurrent generations never exceed maxStoriesPerMonth (advisory-lock recheck)", async () => {
+    const { user, universe } = await seedFullEnv({ maxStories: 2 });
+
+    // Dispara 6 gerações concorrentes; o advisory lock + recheck em transação
+    // deve permitir no máximo 2 (o limite do plano).
+    const results = await Promise.all(
+      Array.from({ length: 6 }, () =>
+        app.inject({
+          method: "POST",
+          url: "/api/v1/stories/generate",
+          headers: bearerHeader(user.id),
+          payload: { universe_id: universe.id },
+        }),
+      ),
+    );
+
+    const created = results.filter((r) => r.statusCode === 201);
+    const overQuota = results.filter((r) => r.statusCode === 402);
+    expect(created.length).toBe(2);
+    expect(overQuota.length).toBe(4);
+    overQuota.forEach((r) => expect(r.json().error.code).toBe("QUOTA_EXCEEDED"));
+
+    // Exatamente 2 histórias e 2 registros de uso — sem bypass da quota
+    expect((await db.select().from(stories)).length).toBe(2);
+    expect((await db.select().from(usageRecords)).length).toBe(2);
   });
 });

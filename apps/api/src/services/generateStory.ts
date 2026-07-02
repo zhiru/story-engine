@@ -19,7 +19,7 @@
  * 10. Return 201 payload (metadata_weather no formato SDD 7.2).
  */
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, sql, sum } from "drizzle-orm";
 import { db } from "../db/client.js";
 import {
   subscriptions,
@@ -32,6 +32,7 @@ import {
   usageRecords,
   auditLogs,
 } from "../db/schema.js";
+import { RESIDUAL_ACCESS_STATUSES } from "../repos/subscriptions.js";
 import { countThisMonth, currentPeriod } from "../repos/usage.js";
 import { getStoryArcById } from "../repos/storyArcs.js";
 import { getOwnedChildProfile } from "../repos/childProfiles.js";
@@ -56,7 +57,8 @@ export class GenerationError extends Error {
       | "CONTENT_REJECTED"
       | "GENERATION_FAILED"
       | "UNIVERSE_ACCESS_DENIED"
-      | "CHILD_PROFILE_NOT_FOUND",
+      | "CHILD_PROFILE_NOT_FOUND"
+      | "THEME_NOT_FOUND",
     message: string,
   ) {
     super(message);
@@ -76,6 +78,10 @@ async function computeSeed(userId: string): Promise<string> {
 
 async function getActiveSubscriptionPlan(userId: string) {
   const now = new Date();
+  // Mesma semântica residual de repos/subscriptions.ts#isSubscriptionActive:
+  // qualquer estado exceto EXPIRED, com current_period_end no futuro. Assim um
+  // usuário em carência (PAST_DUE) ou cancelado dentro do período pago que vê
+  // is_active=true em /me/subscription também consegue gerar.
   const [row] = await db
     .select({ plan: plans, sub: subscriptions })
     .from(subscriptions)
@@ -83,15 +89,15 @@ async function getActiveSubscriptionPlan(userId: string) {
     .where(
       and(
         eq(subscriptions.userId, userId),
-        eq(subscriptions.status, "ACTIVE"),
+        inArray(subscriptions.status, [...RESIDUAL_ACCESS_STATUSES]),
+        gt(subscriptions.currentPeriodEnd, now),
         isNull(subscriptions.deletedAt),
       ),
     )
+    .orderBy(desc(subscriptions.createdAt))
     .limit(1);
 
   if (!row) return null;
-  // Also check period end
-  if (row.sub.currentPeriodEnd < now) return null;
   return row.plan;
 }
 
@@ -276,7 +282,10 @@ export async function generateStory(
       ),
     );
 
-  // Theme: use provided theme_id, or pick the first theme for the universe
+  // Theme: use provided theme_id, or pick the first theme for the universe.
+  // O theme_id fornecido DEVE pertencer ao universo alvo (eq universeId) —
+  // senão um atacante leria/usaria o tema de outro universo (IDOR). Tema
+  // informado mas fora do universo → rejeita (THEME_NOT_FOUND / 404).
   let theme: { id: string; title: string; description: string | null } | null =
     null;
   if (input.theme_id) {
@@ -284,10 +293,20 @@ export async function generateStory(
       .select()
       .from(themes)
       .where(
-        and(eq(themes.id, input.theme_id), isNull(themes.deletedAt)),
+        and(
+          eq(themes.id, input.theme_id),
+          eq(themes.universeId, input.universe_id),
+          isNull(themes.deletedAt),
+        ),
       )
       .limit(1);
-    theme = row ?? null;
+    if (!row) {
+      throw new GenerationError(
+        "THEME_NOT_FOUND",
+        "Tema não encontrado neste universo.",
+      );
+    }
+    theme = row;
   }
   if (!theme) {
     const [row] = await db
@@ -300,10 +319,19 @@ export async function generateStory(
     theme = row ?? null;
   }
 
-  // Story arc (for CONTINUOUS)
+  // Story arc (for CONTINUOUS). O arco DEVE pertencer ao universo alvo — senão
+  // um atacante passaria o story_arc_id de outro universo, lendo o summary dele
+  // no prompt E fazendo o pipeline sobrescrever summary/version do arco alheio
+  // (IDOR + corrupção). Divergência → UNIVERSE_ACCESS_DENIED (403).
   let arc: Awaited<ReturnType<typeof getStoryArcById>> = null;
   if (input.story_arc_id) {
     arc = await getStoryArcById(input.story_arc_id);
+    if (arc && arc.universeId !== input.universe_id) {
+      throw new GenerationError(
+        "UNIVERSE_ACCESS_DENIED",
+        "Acesso negado: o arco narrativo não pertence a este universo.",
+      );
+    }
   }
 
   const narrativeType: "STANDALONE" | "CONTINUOUS" = arc
@@ -421,11 +449,18 @@ export async function generateStory(
       seed: seed + "-retry",
     };
     const reinforced = await tryProviders(providers, reinforcedInput);
-    if (reinforced) {
-      generation = reinforced;
-      promptUsed = reinforcedPrompt;
+    if (!reinforced) {
+      // Todos os provedores falharam na regeneração reforçada: é um outage
+      // transitório (503), NÃO conteúdo reprovado. Moderar uma string vazia
+      // aqui reportaria 422 CONTENT_REJECTED indevidamente.
+      throw new GenerationError(
+        "GENERATION_FAILED",
+        "Não foi possível gerar a história. Tente novamente em instantes.",
+      );
     }
-    modResult = moderateOutput(reinforced?.output.story_body ?? "");
+    generation = reinforced;
+    promptUsed = reinforcedPrompt;
+    modResult = moderateOutput(reinforced.output.story_body);
     if (!modResult.ok) {
       await insertAuditLog(actor.id, "STORY_GENERATION_OUTPUT_REJECTED", undefined, {
         reason: modResult.reason,
@@ -460,6 +495,31 @@ export async function generateStory(
   for (let attempt = 1; attempt <= ARC_LOCK_MAX_ATTEMPTS; attempt++) {
     try {
       newStory = await db.transaction(async (tx) => {
+        // Guarda TOCTOU da quota mensal: sob concorrência várias requisições
+        // passam o pré-check (fast path) ao mesmo tempo. Serializamos por
+        // usuário com um advisory lock transacional e RECHECAMOS a contagem do
+        // mês dentro da transação, antes de consumir a quota. Excedente aborta
+        // com QUOTA_EXCEEDED (402) e rollback — nada é persistido nem consumido.
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtextextended(${actor.id}, 0))`,
+        );
+        const [usageRow] = await tx
+          .select({ total: sum(usageRecords.quantity) })
+          .from(usageRecords)
+          .where(
+            and(
+              eq(usageRecords.userId, actor.id),
+              eq(usageRecords.metric, "STORY_GENERATED"),
+              eq(usageRecords.period, currentPeriod()),
+            ),
+          );
+        if (Number(usageRow?.total ?? 0) >= plan.maxStoriesPerMonth) {
+          throw new GenerationError(
+            "QUOTA_EXCEEDED",
+            `Você atingiu o limite de ${plan.maxStoriesPerMonth} histórias por mês do seu plano.`,
+          );
+        }
+
         const [inserted] = await tx
           .insert(stories)
           .values({

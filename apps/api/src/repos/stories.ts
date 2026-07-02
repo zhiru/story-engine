@@ -27,27 +27,37 @@ export async function listApproved(universeId: string) {
 }
 
 /**
- * Get a single story:
- * - APPROVED stories are readable by any actor.
- * - PENDING/REJECTED stories are only readable by the owner or ADMIN/MODERATOR.
+ * Get a single story (mesma regra de leitura de listReadable — SDD §6.4):
+ * - o GERADOR (stories.user_id), o dono do universo pai e ADMIN/MODERATOR
+ *   têm leitura total (qualquer visibility/moderation_status);
+ * - qualquer outro requisitante lê SOMENTE
+ *   visibility='PUBLIC' AND moderation_status='APPROVED'.
+ * Toda história gerada nasce APPROVED+PRIVATE, então ler por moderation_status
+ * apenas vazaria histórias privadas de terceiros (IDOR).
  * Returns null when the actor should not see the story (caller sends 404).
  */
 export async function getReadable(actor: Actor, id: string) {
   const [row] = await db
-    .select()
+    .select({ story: stories, universeUserId: universes.userId })
     .from(stories)
+    .innerJoin(universes, eq(universes.id, stories.universeId))
     .where(and(eq(stories.id, id), isNull(stories.deletedAt)))
     .limit(1);
 
   if (!row) return null;
 
-  const isApproved = row.moderationStatus === "APPROVED";
-  const isOwner = row.userId === actor.id;
+  const story = row.story;
+  const isOwner = story.userId === actor.id; // gerador
+  const isUniverseOwner = row.universeUserId === actor.id; // dono do universo pai
   const isAdmin = actor.role === "ADMIN" || actor.role === "MODERATOR";
+  const isPublicApproved =
+    story.visibility === "PUBLIC" && story.moderationStatus === "APPROVED";
 
-  if (!isApproved && !isOwner && !isAdmin) return null;
+  if (!isOwner && !isUniverseOwner && !isAdmin && !isPublicApproved) {
+    return null;
+  }
 
-  return row;
+  return story;
 }
 
 /**

@@ -579,6 +579,112 @@ describe("POST /api/v1/billing/webhook — subscription state machine", () => {
   });
 });
 
+// ── Idempotência atômica (índice único parcial, finding 8) ────────────────────
+
+describe("POST /api/v1/billing/webhook — atomic idempotency (uq_billing_event)", () => {
+  it("the partial unique index rejects a duplicate BILLING_EVENT event_id at the DB level", async () => {
+    // Primeira auditoria com event_id — ok
+    await db.insert(auditLogs).values({
+      actorId: null,
+      action: "BILLING_EVENT",
+      metadata: { event_id: "evt-uq-1" },
+    });
+    // Segunda com o MESMO event_id + action BILLING_EVENT — viola a unique
+    await expect(
+      db.insert(auditLogs).values({
+        actorId: null,
+        action: "BILLING_EVENT",
+        metadata: { event_id: "evt-uq-1" },
+      }),
+    ).rejects.toThrow();
+
+    // Mesmo event_id porém OUTRA action (índice parcial) — permitido
+    await expect(
+      db.insert(auditLogs).values({
+        actorId: null,
+        action: "SOMETHING_ELSE",
+        metadata: { event_id: "evt-uq-1" },
+      }),
+    ).resolves.toBeDefined();
+  });
+
+  it("two concurrent webhooks with the same event.id → one processes, one duplicate, single subscription mutation", async () => {
+    const user = await seedUser({ email: "concurrent@test.com" });
+    await seedPlan();
+
+    const evt = makeEvent({
+      id: "evt-concurrent-1",
+      type: "INITIAL_PURCHASE",
+      app_user_id: user.id,
+    });
+
+    const [a, b] = await Promise.all([postWebhook(evt), postWebhook(evt)]);
+    expect(a.statusCode).toBe(200);
+    expect(b.statusCode).toBe(200);
+
+    const bodies = [a.json(), b.json()];
+    const processed = bodies.filter((x) => x.ok === true);
+    const duplicates = bodies.filter((x) => x.duplicate === true);
+    expect(processed.length).toBe(1);
+    expect(duplicates.length).toBe(1);
+
+    // Apenas UMA auditoria para o event_id e UMA assinatura (mutação única)
+    const audits = await getBillingAudits();
+    const matching = audits.filter(
+      (x) => (x.metadata as { event_id?: string }).event_id === "evt-concurrent-1",
+    );
+    expect(matching.length).toBe(1);
+
+    const subs = await db.select().from(subscriptions);
+    expect(subs.length).toBe(1);
+    expect(subs[0]!.status).toBe("ACTIVE");
+  });
+});
+
+// ── BILLING_ISSUE: carência não empilha sem expiration (finding 9) ────────────
+
+describe("POST /api/v1/billing/webhook — BILLING_ISSUE grace does not stack", () => {
+  it("two BILLING_ISSUE events without expiration do not double-extend the period", async () => {
+    const user = await seedUser({ email: "grace-nostack@test.com" });
+    const plan = await seedPlan();
+    const p0 = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
+    await seedSubscription(user.id, plan.id, { currentPeriodEnd: p0 });
+
+    const graceMs = 3 * 24 * 60 * 60 * 1000; // GRACE_PERIOD_DAYS default 3
+
+    // 1º BILLING_ISSUE (sem expiration): existing ACTIVE → estende 1x a carência
+    const first = await postWebhook(
+      makeEvent({
+        id: "evt-issue-1",
+        type: "BILLING_ISSUE",
+        app_user_id: user.id,
+        expiration_at_ms: null,
+      }),
+    );
+    expect(first.statusCode).toBe(200);
+    expect(first.json().status).toBe("PAST_DUE");
+
+    const afterFirst = await getSubscriptionRow(user.id);
+    expect(afterFirst!.currentPeriodEnd.getTime()).toBe(p0.getTime() + graceMs);
+
+    // 2º BILLING_ISSUE (sem expiration): existing já PAST_DUE → NÃO re-estende
+    const second = await postWebhook(
+      makeEvent({
+        id: "evt-issue-2",
+        type: "BILLING_ISSUE",
+        app_user_id: user.id,
+        expiration_at_ms: null,
+      }),
+    );
+    expect(second.statusCode).toBe(200);
+    expect(second.json().status).toBe("PAST_DUE");
+
+    const afterSecond = await getSubscriptionRow(user.id);
+    // Mesmo valor de após o 1º evento — carência aplicada uma única vez
+    expect(afterSecond!.currentPeriodEnd.getTime()).toBe(p0.getTime() + graceMs);
+  });
+});
+
 // ── /me/subscription e /me/usage ─────────────────────────────────────────────
 
 describe("GET /api/v1/me/subscription", () => {
