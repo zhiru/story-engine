@@ -307,6 +307,7 @@ export default function ProvidersScreen() {
             </Text>
             {formError ? <Text style={styles.formError}>{formError}</Text> : null}
             <ProviderForm
+              key={editingProvider.id}
               initial={formInitial}
               onSave={(f) => void handleSave(f)}
               onCancel={() => setEditingProvider(null)}

@@ -1,6 +1,8 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import { register, login, refresh, recordConsent, getMe } from '../lib/api';
+import { register, login, refresh, recordConsent, getMe, logout, setAuthHandlers } from '../lib/api';
+import { resetAppModeCache } from '../components/AppShell';
+import { resetThemeCache } from '../theme/AppThemeContext';
 import type { RegisterInput, LoginInput, ConsentInput } from '@storygen/shared';
 
 const ACCESS_TOKEN_KEY = 'storygen_access_token';
@@ -56,21 +58,28 @@ async function fetchAndApplyMe(
     // RF-02: consentimento é derivado do servidor (has_parental_consent) —
     // um responsável que já consentiu não revê o gate em outro dispositivo.
     // O SecureStore fica só como cache otimista para o boot offline.
-    setState((s) => ({
-      ...s,
-      role: me.role,
-      email: me.email,
-      userId: me.id,
-      hasConsent: me.has_parental_consent,
-    }));
-    try {
-      await SecureStore.setItemAsync(
+    //
+    // Guarda anti-obsolescência: se o token corrente mudou (signOut ou refresh)
+    // desde que este /me foi disparado, ignora o resultado E não reescreve o
+    // cache de consentimento — evita que um /me do boot ressuscite o papel/
+    // consentimento do usuário anterior após o signOut.
+    setState((s) => {
+      if (s.accessToken !== accessToken) return s;
+      // Token confere → persiste o cache otimista de consentimento (best-effort).
+      void SecureStore.setItemAsync(
         HAS_CONSENT_KEY,
         me.has_parental_consent ? 'true' : 'false',
-      );
-    } catch {
-      // acceptable on web
-    }
+      ).catch(() => {
+        // acceptable on web
+      });
+      return {
+        ...s,
+        role: me.role,
+        email: me.email,
+        userId: me.id,
+        hasConsent: me.has_parental_consent,
+      };
+    });
   } catch {
     // tolerate failure — role stays null and hasConsent keeps the cached value
   }
@@ -86,6 +95,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     email: null,
     userId: null,
   });
+
+  // Espelho síncrono do estado: permite que handlers estáveis (refresh-on-401,
+  // signOut) leiam sempre os tokens correntes sem closures obsoletas.
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   // Load persisted tokens on mount
   useEffect(() => {
@@ -147,6 +163,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    // Best-effort: invalida o refresh token no servidor ANTES de limpar o
+    // armazenamento local (lê os tokens correntes via stateRef).
+    const { accessToken, refreshToken } = stateRef.current;
+    if (accessToken && refreshToken) {
+      try {
+        await logout(refreshToken, accessToken);
+      } catch {
+        // ignora — logout é best-effort (rede/token expirado)
+      }
+    }
+    // Limpa caches de módulo (modo do app + tema/marca) para que o próximo
+    // usuário não herde nav/branding do anterior.
+    resetAppModeCache();
+    resetThemeCache();
     await clearTokens();
     setState({
       accessToken: null,
@@ -158,6 +188,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       userId: null,
     });
   }, []);
+
+  // Registra os handlers de refresh-on-401 no módulo de API. Os helpers
+  // (get/post/patch/put/del) renovam o access token automaticamente em 401
+  // (single-flight) e refazem a requisição; se o refresh falhar, onAuthLost
+  // dispara signOut.
+  useEffect(() => {
+    setAuthHandlers({
+      getRefreshToken: () => stateRef.current.refreshToken,
+      onTokens: (tokens) => {
+        void saveTokens(tokens.access_token, tokens.refresh_token);
+        setState((s) => ({
+          ...s,
+          accessToken: tokens.access_token,
+          refreshToken: tokens.refresh_token,
+        }));
+      },
+      onAuthLost: () => {
+        void signOut();
+      },
+    });
+    return () => setAuthHandlers(null);
+  }, [signOut]);
 
   const grantConsent = useCallback(
     async (input: ConsentInput) => {

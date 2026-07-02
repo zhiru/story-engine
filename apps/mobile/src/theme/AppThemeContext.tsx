@@ -43,6 +43,14 @@ function themeFromConfig(raw: Record<string, string> | undefined): AppTheme {
 // troca de tela (mesmo padrão do cachedAppMode no AppShell).
 let cachedTheme: AppTheme | null = null;
 
+/**
+ * Limpa o cache de tema. Chamado no signOut para que o próximo usuário não
+ * herde a marca/tema (cores, logo, nome) do anterior.
+ */
+export function resetThemeCache(): void {
+  cachedTheme = null;
+}
+
 const AppThemeContext = createContext<AppTheme>(DEFAULT_THEME);
 
 export function AppThemeProvider({ children }: { children: React.ReactNode }) {

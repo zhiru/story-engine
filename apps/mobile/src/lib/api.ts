@@ -110,16 +110,23 @@ async function post<T>(
   body: unknown,
   accessToken?: string,
 ): Promise<T> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "X-App-Slug": appSlug,
+  const send = (token?: string): Promise<Response> => {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "X-App-Slug": appSlug,
+    };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    return fetch(`${apiUrl}/api/v1${path}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
   };
-  if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
-  const res = await fetch(`${apiUrl}/api/v1${path}`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  });
+  // Rotas de auth (register/login/refresh) não passam accessToken → sem
+  // refresh-on-401. Chamadas autenticadas usam sendAuthed (renova em 401).
+  const res = accessToken
+    ? await sendAuthed((t) => send(t), accessToken)
+    : await send();
   if (!res.ok) return throwHttpError(res);
   return res.json() as Promise<T>;
 }
@@ -136,6 +143,72 @@ export async function refresh(refreshToken: string): Promise<AuthTokens> {
   return post<AuthTokens>("/auth/refresh", { refresh_token: refreshToken });
 }
 
+// ── Refresh-on-401 (single-flight) ───────────────────────────────────────────
+// O AuthContext registra handlers para que os helpers autenticados possam
+// renovar o access token (15 min) automaticamente quando a API responde 401.
+// getRefreshToken → refresh token corrente; onTokens → persiste o novo par;
+// onAuthLost → sessão perdida (o AuthContext faz signOut).
+type AuthHandlers = {
+  getRefreshToken: () => string | null;
+  onTokens: (tokens: AuthTokens) => void;
+  onAuthLost: () => void;
+};
+
+let authHandlers: AuthHandlers | null = null;
+
+export function setAuthHandlers(handlers: AuthHandlers | null): void {
+  authHandlers = handlers;
+}
+
+// Dedup de 401s concorrentes: um único refresh em andamento por vez. 401s
+// simultâneos aguardam a MESMA promise em vez de dispararem N refreshes.
+let refreshInFlight: Promise<string | null> | null = null;
+
+/**
+ * Renova o access token uma única vez (single-flight). Retorna o novo access
+ * token, ou null se não houver como renovar (sem handlers / sem refresh token /
+ * refresh falhou). Em falha, dispara onAuthLost.
+ */
+async function runRefresh(): Promise<string | null> {
+  if (!authHandlers) return null;
+  const refreshToken = authHandlers.getRefreshToken();
+  if (!refreshToken) return null;
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      try {
+        const tokens = await refresh(refreshToken);
+        authHandlers?.onTokens(tokens);
+        return tokens.access_token;
+      } catch {
+        authHandlers?.onAuthLost();
+        return null;
+      } finally {
+        refreshInFlight = null;
+      }
+    })();
+  }
+  return refreshInFlight;
+}
+
+/**
+ * Executa uma requisição autenticada com refresh-on-401. `send(token)` monta e
+ * dispara o fetch com o Bearer informado. Em 401 (com refresh token válido),
+ * renova UMA vez e refaz a requisição com o NOVO token (retry no máximo 1×).
+ */
+async function sendAuthed(
+  send: (token: string) => Promise<Response>,
+  accessToken: string,
+): Promise<Response> {
+  const res = await send(accessToken);
+  if (res.status === 401 && authHandlers?.getRefreshToken()) {
+    const newToken = await runRefresh();
+    if (newToken) {
+      return send(newToken);
+    }
+  }
+  return res;
+}
+
 export async function recordConsent(
   input: ConsentInput,
   accessToken: string,
@@ -143,13 +216,37 @@ export async function recordConsent(
   await post<{ message: string }>("/auth/consent", input, accessToken);
 }
 
-async function get<T>(path: string, accessToken: string): Promise<T> {
-  const res = await fetch(`${apiUrl}/api/v1${path}`, {
+/**
+ * POST /auth/logout — revoga o refresh token no servidor (best-effort).
+ * O endpoint exige autenticação (requireAuth), então enviamos o access token
+ * corrente. Intencionalmente NÃO passa pelo refresh-on-401: durante o signOut
+ * uma renovação/onAuthLost causaria recursão. Chame dentro de try/catch.
+ */
+export async function logout(
+  refreshToken: string,
+  accessToken: string,
+): Promise<void> {
+  const res = await fetch(`${apiUrl}/api/v1/auth/logout`, {
+    method: "POST",
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
       "X-App-Slug": appSlug,
+      Authorization: `Bearer ${accessToken}`,
     },
+    body: JSON.stringify({ refresh_token: refreshToken }),
   });
+  if (!res.ok) return throwHttpError(res);
+}
+
+async function get<T>(path: string, accessToken: string): Promise<T> {
+  const send = (token: string): Promise<Response> =>
+    fetch(`${apiUrl}/api/v1${path}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-App-Slug": appSlug,
+      },
+    });
+  const res = await sendAuthed(send, accessToken);
   if (!res.ok) return throwHttpError(res);
   return res.json() as Promise<T>;
 }
@@ -159,16 +256,17 @@ async function patch<T>(
   body: unknown,
   accessToken: string,
 ): Promise<T> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "X-App-Slug": appSlug,
-    Authorization: `Bearer ${accessToken}`,
-  };
-  const res = await fetch(`${apiUrl}/api/v1${path}`, {
-    method: "PATCH",
-    headers,
-    body: JSON.stringify(body),
-  });
+  const send = (token: string): Promise<Response> =>
+    fetch(`${apiUrl}/api/v1${path}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "X-App-Slug": appSlug,
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+    });
+  const res = await sendAuthed(send, accessToken);
   if (!res.ok) return throwHttpError(res);
   return res.json() as Promise<T>;
 }
@@ -178,16 +276,17 @@ async function put<T>(
   body: unknown,
   accessToken: string,
 ): Promise<T> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "X-App-Slug": appSlug,
-    Authorization: `Bearer ${accessToken}`,
-  };
-  const res = await fetch(`${apiUrl}/api/v1${path}`, {
-    method: "PUT",
-    headers,
-    body: JSON.stringify(body),
-  });
+  const send = (token: string): Promise<Response> =>
+    fetch(`${apiUrl}/api/v1${path}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-App-Slug": appSlug,
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+    });
+  const res = await sendAuthed(send, accessToken);
   if (!res.ok) return throwHttpError(res);
   return res.json() as Promise<T>;
 }
@@ -197,16 +296,19 @@ async function del<T>(
   accessToken: string,
   body?: unknown,
 ): Promise<T> {
-  const headers: Record<string, string> = {
-    "X-App-Slug": appSlug,
-    Authorization: `Bearer ${accessToken}`,
+  const send = (token: string): Promise<Response> => {
+    const headers: Record<string, string> = {
+      "X-App-Slug": appSlug,
+      Authorization: `Bearer ${token}`,
+    };
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    return fetch(`${apiUrl}/api/v1${path}`, {
+      method: "DELETE",
+      headers,
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
   };
-  if (body !== undefined) headers["Content-Type"] = "application/json";
-  const res = await fetch(`${apiUrl}/api/v1${path}`, {
-    method: "DELETE",
-    headers,
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-  });
+  const res = await sendAuthed(send, accessToken);
   if (!res.ok) return throwHttpError(res);
   // DELETE may return 204 No Content
   const text = await res.text();

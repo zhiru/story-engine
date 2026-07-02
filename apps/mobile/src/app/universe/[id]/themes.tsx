@@ -175,7 +175,9 @@ export default function UniverseThemesScreen() {
       if (editingTheme) {
         const input: UpdateThemeInput = {
           title: form.title.trim(),
-          description: form.description.trim() || undefined,
+          // Envia "" (não undefined) para que limpar a descrição persista o
+          // clear no servidor — undefined seria omitido do PATCH (no-op).
+          description: form.description.trim(),
         };
         await updateTheme(id, editingTheme.id, input, accessToken);
       } else {
@@ -312,6 +314,7 @@ export default function UniverseThemesScreen() {
             </Text>
             {formError ? <Text style={styles.formError}>{formError}</Text> : null}
             <ThemeForm
+              key={editingTheme?.id ?? 'new'}
               initial={formInitial}
               onSave={(f) => void handleSave(f)}
               onCancel={() => {
