@@ -15,6 +15,13 @@
       "when": 1781446472403,
       "tag": "0001_peaceful_grey_gargoyle",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782000000000,
+      "tag": "0002_integrity_checks_indexes_triggers",
+      "breakpoints": true
     }
   ]
 }
