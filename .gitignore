@@ -153,3 +153,4 @@ deploy/dist-multi/
 server-access.md
 *.local.md
 ACESSOS*.md
+.claude/

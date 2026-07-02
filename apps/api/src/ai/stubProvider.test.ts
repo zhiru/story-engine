@@ -12,8 +12,9 @@ const BASE_INPUT: GenerateInput = {
     { name: "Bolt", classification: "MASCOTE", traits: ["fiel"] },
   ],
   theme: { title: "Amizade", description: "Sobre amigos de verdade." },
-  weather: { condition: "ensolarado", temperature: 24, currentTime: "manhã" },
-  narrativeType: "SINGLE",
+  // Forma SDD 7.2: { temp, condition, time, source }
+  weather: { temp: 24, condition: "ensolarado", time: "Manhã", source: "fallback" },
+  narrativeType: "STANDALONE",
   seed: "test-seed-001",
 };
 
@@ -40,9 +41,9 @@ describe("stubProvider", () => {
     expect(hasHook).toBe(true);
   });
 
-  it("SINGLE narrative does NOT end with a hook (no new mystery sentence)", async () => {
-    const out = await stubProvider.generate({ ...BASE_INPUT, narrativeType: "SINGLE" });
-    // Should be 5 paragraphs for SINGLE
+  it("STANDALONE narrative does NOT end with a hook (no new mystery sentence)", async () => {
+    const out = await stubProvider.generate({ ...BASE_INPUT, narrativeType: "STANDALONE" });
+    // Should be 5 paragraphs for STANDALONE
     const paragraphs = out.story_body.split("\n\n");
     expect(paragraphs.length).toBe(5);
   });

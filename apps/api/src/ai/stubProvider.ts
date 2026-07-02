@@ -118,6 +118,22 @@ const WEATHER_INTEGRATIONS: Record<string, string[]> = {
     "Através do nevoeiro da manhã",
     "Enquanto a névoa cobria o caminho",
   ],
+  // Condições pt-BR vindas do OpenWeatherMap (ai/weather.ts)
+  tempestade: [
+    "Com trovões ecoando ao longe",
+    "Enquanto a tempestade cantava lá fora",
+    "Protegidos da grande tempestade",
+  ],
+  neve: [
+    "Com a neve cobrindo tudo de branco",
+    "Brincando na neve fofinha",
+    "Admirando os flocos de neve",
+  ],
+  neblina: [
+    "Com uma neblina misteriosa ao redor",
+    "Através da neblina da manhã",
+    "Enquanto a neblina cobria o caminho",
+  ],
 };
 
 const TIME_PHRASES: Record<string, string[]> = {
@@ -138,6 +154,11 @@ const TIME_PHRASES: Record<string, string[]> = {
     "na hora de dormir",
     "enquanto a lua subia no céu",
     "no silêncio da noite",
+  ],
+  madrugada: [
+    "bem antes do sol nascer",
+    "no silêncio da madrugada",
+    "enquanto todos ainda sonhavam",
   ],
 };
 
@@ -162,11 +183,14 @@ function generateStory(input: GenerateInput): GenerateOutput {
   const companions = others.length > 0 ? others.join(" e ") : null;
 
   const opening = pick(OPENINGS, seed, "opening");
+  // Condições podem vir capitalizadas do OpenWeatherMap ("Chuvoso") ou
+  // minúsculas do fallback determinístico ("chuvoso") — normaliza a busca.
   const weatherIntegrations =
-    WEATHER_INTEGRATIONS[weather.condition] ?? WEATHER_INTEGRATIONS["ensolarado"]!;
+    WEATHER_INTEGRATIONS[weather.condition.toLowerCase()] ??
+    WEATHER_INTEGRATIONS["ensolarado"]!;
   const weatherPhrase = pick(weatherIntegrations, seed, "weather");
   const timePhrases =
-    TIME_PHRASES[weather.currentTime] ?? TIME_PHRASES["manhã"]!;
+    TIME_PHRASES[weather.time.toLowerCase()] ?? TIME_PHRASES["manhã"]!;
   const timePhrase = pick(timePhrases, seed, "time");
   const conflict = pick(CONFLICTS, seed, "conflict");
   const resolution = pick(RESOLUTIONS, seed, "resolution");
@@ -212,7 +236,7 @@ function generateStory(input: GenerateInput): GenerateOutput {
     `A Aventura de ${hero}`,
     `${hero} e o Segredo de ${universe.title}`,
     `A Incrível Jornada de ${hero}`,
-    `${hero} e o Mistério do Dia ${weather.condition === "ensolarado" ? "Ensolarado" : "Encantado"}`,
+    `${hero} e o Mistério do Dia ${weather.condition.toLowerCase() === "ensolarado" ? "Ensolarado" : "Encantado"}`,
     `${hero} Descobre o Poder da ${theme.title.split(" ")[0] ?? "Amizade"}`,
   ];
   const title = pick(titleTemplates, seed, "title");
@@ -227,6 +251,11 @@ function generateStory(input: GenerateInput): GenerateOutput {
     title,
     story_body,
     internal_summary_for_next_chapters,
+    // Estimativa offline de tokens (~4 chars/token) para o registro de custo.
+    usage: {
+      inputTokens: Math.ceil(input.prompt.length / 4),
+      outputTokens: Math.ceil(story_body.length / 4),
+    },
   };
 }
 

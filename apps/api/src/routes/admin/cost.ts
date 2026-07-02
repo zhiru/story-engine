@@ -33,12 +33,13 @@ export async function adminCostRoutes(app: FastifyInstance): Promise<void> {
       const totalStories = totalRow?.count ?? 0;
 
       // Aggregate token usage from generationCost jsonb by provider
-      // generationCost shape: { provider, inputTokens, outputTokens, ... }
+      // generationCost shape (SDD 8.5, snake_case):
+      // { input_tokens, output_tokens, provider, model }
       const providerRows = await db
         .select({
           provider: sql<string>`(generation_cost->>'provider')`,
-          inputTokens: sql<number>`sum((generation_cost->>'inputTokens')::numeric)::bigint`,
-          outputTokens: sql<number>`sum((generation_cost->>'outputTokens')::numeric)::bigint`,
+          inputTokens: sql<number>`sum((generation_cost->>'input_tokens')::numeric)::bigint`,
+          outputTokens: sql<number>`sum((generation_cost->>'output_tokens')::numeric)::bigint`,
           count: sql<number>`count(*)::int`,
         })
         .from(stories)

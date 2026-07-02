@@ -13,6 +13,8 @@ export const env = {
   aiBaseUrl: process.env.AI_BASE_URL ?? "",
   aiApiKey: process.env.AI_API_KEY ?? "",
   aiModel: process.env.AI_MODEL ?? "",
+  // Clima real (RF-22): opcional; sem chave, contexto usa fallback determinístico.
+  openWeatherApiKey: process.env.OPENWEATHER_API_KEY ?? "",
   // Rate limiting
   rateLimitDisabled: process.env.RATE_LIMIT_DISABLED === "true",
   // SDD §7: 60 req/min por usuário

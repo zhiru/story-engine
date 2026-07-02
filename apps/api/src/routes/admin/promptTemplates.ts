@@ -5,6 +5,16 @@ import { CreatePromptTemplateInputSchema, UpdatePromptTemplateInputSchema } from
 import { db } from "../../db/client.js";
 import { promptTemplates, auditLogs, aiProviders } from "../../db/schema.js";
 import { and, asc, eq, isNull, ne } from "drizzle-orm";
+import { containsSafetyBlock } from "../../ai/prompt.js";
+
+/**
+ * SDD 8.4 camada 1 / RF-42: o editor de prompts NÃO permite remover o bloco
+ * fixo de diretrizes de segurança infantil. Criar/editar/ativar um template
+ * sem o SAFETY_BLOCK verbatim → 422.
+ */
+const SAFETY_BLOCK_ERROR =
+  "O template deve conter o bloco fixo de diretrizes de segurança infantil " +
+  "(SAFETY_BLOCK) verbatim — ele não pode ser removido nem editado.";
 
 export async function adminPromptTemplateRoutes(app: FastifyInstance): Promise<void> {
   /**
@@ -39,6 +49,11 @@ export async function adminPromptTemplateRoutes(app: FastifyInstance): Promise<v
       const parsed = CreatePromptTemplateInputSchema.safeParse(request.body);
       if (!parsed.success) {
         return sendError(reply, 400, "VALIDATION_ERROR", "Invalid input", parsed.error.flatten());
+      }
+
+      // Guarda do bloco fixo de segurança (SDD 8.4 camada 1)
+      if (!containsSafetyBlock(parsed.data.template)) {
+        return sendError(reply, 422, "SAFETY_BLOCK_REQUIRED", SAFETY_BLOCK_ERROR);
       }
 
       // Verify the AI provider exists
@@ -121,6 +136,16 @@ export async function adminPromptTemplateRoutes(app: FastifyInstance): Promise<v
 
       if (!existing) {
         return sendError(reply, 404, "NOT_FOUND", "Prompt template not found");
+      }
+
+      // Guarda do bloco fixo de segurança (SDD 8.4 camada 1): vale para edição
+      // do texto e para ativação (o template resultante precisa conter o bloco).
+      const effectiveTemplate = parsed.data.template ?? existing.template;
+      if (
+        (parsed.data.template !== undefined || parsed.data.isActive === true) &&
+        !containsSafetyBlock(effectiveTemplate)
+      ) {
+        return sendError(reply, 422, "SAFETY_BLOCK_REQUIRED", SAFETY_BLOCK_ERROR);
       }
 
       const updateData: Record<string, unknown> = { updatedAt: new Date() };
