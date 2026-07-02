@@ -59,4 +59,22 @@ A geração usa o gateway **OmniRoute → Claude**. Se o gateway estiver fora (e
 Edita `apps/api/.env` → `AI_MODEL=cc/claude-sonnet-4-6` (prosa melhor, mais lento) e `docker compose -f docker-compose.demo.yml up -d --build api`.
 
 ## Status do produto
-Pronto até o **WP4** (núcleo): auth, consentimento, modos SINGLE/MULTI, CRUD criativo, geração por IA com quota/moderação, leitura. Pendente: WP5 billing real (RevenueCat), WP6 painel admin, WP7 observabilidade/LGPD-erasure. Tudo na branch `feat/wp0-foundation` (não mesclada).
+Fase 1 do SDD **completa** na branch `feat/wp0-foundation` (não mesclada). Cobertura vs SDD:
+
+- **Auth/contas:** e-mail+senha, JWT access/refresh com rotação, RBAC (USER/MODERATOR/ADMIN), consentimento parental derivado do servidor (`/me`), suspensão de conta imposta em toda requisição.
+- **Domínio criativo:** CRUD completo de universos (com visibilidade + localização), personagens, temas e arcos; modos SINGLE/MULTI por `app_slug`; blocklist infantil na criação/edição.
+- **Geração por IA (§8):** contexto de clima real (OpenWeatherMap + cache 30 min + fallback determinístico), registro de context providers, saída estruturada JSON, retry+backoff e fallback de provedor, moderação de saída com regeneração reforçada, persistência transacional com lock otimista do arco, custo de tokens, corpus adversarial anti-injection.
+- **Billing (§7/RF-50..52):** webhook RevenueCat (máquina de estados ACTIVE/PAST_DUE/CANCELED/EXPIRED + carência), idempotência, `GET /me/subscription` e `/me/usage`.
+- **Descoberta/comunidade:** feed `/discovery` paginado por cursor, avaliações 1–5, denúncia de conteúdo, moderação.
+- **Admin (RF-40..46):** planos, usuários, editor de prompts (com bloco de segurança obrigatório), provedores de IA, fila de moderação, `app_settings`/tema, auditoria, painel LGPD.
+- **LGPD/infra:** erasure com anonimização (`[ANONIMIZADO_<hash>]`) e purga opcional de histórias privadas, job de retenção FK-safe, backups (sidecar `pg_dump`), integridade de banco (CHECKs, índices parciais, trigger `set_updated_at`), Sentry + logs com `request_id`.
+- **App (Expo Web/PWA):** login, consentimento, perfis infantis, geração com tema/arco/perfil/geo, leitura, denúncia, assinatura, descoberta+avaliação, gestão MULTI (editar/excluir universo, personagens, temas), tema remoto white-label (logo/cor/nome via `app_settings`), 8 telas admin, tudo em pt-BR.
+
+Contrato de erro padronizado `{ error: { code, message, request_id } }`, rate limit por IP (global) + por usuário (geração), paginação por cursor.
+
+### Variáveis de ambiente novas (`apps/api/.env`, todas opcionais)
+- `REVENUECAT_WEBHOOK_TOKEN` — auth do webhook de billing (vazio ⇒ webhook responde 503).
+- `GRACE_PERIOD_DAYS` (padrão 3) — carência em `BILLING_ISSUE`.
+- `OPENWEATHER_API_KEY` — clima real; vazio ⇒ fallback determinístico (o app não quebra).
+
+Nenhuma delas é obrigatória para subir o stack da demo.
