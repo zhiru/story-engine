@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { useRouter, usePathname } from 'expo-router';
 import { useAuth } from '../auth/AuthContext';
+import { getConfig } from '../lib/api';
 
 const SIDEBAR_WIDTH = 230;
 const BREAKPOINT = 760;
@@ -18,6 +19,52 @@ type NavItem = {
   route: string;
 };
 
+// Cache de módulo: o modo do app (SINGLE/MULTI) muda raramente — evita
+// refazer GET /config a cada troca de tela.
+let cachedAppMode: 'SINGLE' | 'MULTI' | null = null;
+
+function useAppMode(): 'SINGLE' | 'MULTI' | null {
+  const { accessToken } = useAuth();
+  const [mode, setMode] = useState<'SINGLE' | 'MULTI' | null>(cachedAppMode);
+
+  useEffect(() => {
+    if (!accessToken || cachedAppMode) return;
+    getConfig(accessToken)
+      .then((config) => {
+        cachedAppMode = config.appMode;
+        setMode(config.appMode);
+      })
+      .catch(() => {
+        // sem config, links extras ficam ocultos — tolerável
+      });
+  }, [accessToken]);
+
+  return mode;
+}
+
+function useNavLinks(): { mainLinks: NavItem[]; adminLinks: NavItem[]; isAdmin: boolean } {
+  const { role } = useAuth();
+  const appMode = useAppMode();
+
+  const isAdmin = role === 'ADMIN' || role === 'MODERATOR';
+
+  const mainLinks: NavItem[] = [
+    { label: '📖 Histórias', route: '/' },
+    { label: '✨ Gerar história', route: '/generate' },
+    // Descoberta de universos públicos só faz sentido no modo MULTI (RF-30)
+    ...(appMode === 'MULTI' ? [{ label: '🔭 Descobrir', route: '/explore' }] : []),
+    { label: '👶 Perfis infantis', route: '/child-profiles' },
+    { label: '⭐ Assinatura', route: '/subscription' },
+  ];
+
+  const adminLinks: NavItem[] = [
+    { label: '🧒 Personagens', route: '/admin/characters' },
+    { label: '🎭 Temas', route: '/admin/themes' },
+  ];
+
+  return { mainLinks, adminLinks, isAdmin };
+}
+
 function SidebarContent({
   onNav,
 }: {
@@ -25,19 +72,8 @@ function SidebarContent({
 }) {
   const router = useRouter() as ReturnType<typeof useRouter> & { push: (r: string) => void };
   const pathname = usePathname();
-  const { signOut, role } = useAuth();
-
-  const isAdmin = role === 'ADMIN' || role === 'MODERATOR';
-
-  const mainLinks: NavItem[] = [
-    { label: '📖 Histórias', route: '/' },
-    { label: '✨ Gerar história', route: '/generate' },
-  ];
-
-  const adminLinks: NavItem[] = [
-    { label: '🧒 Personagens', route: '/admin/characters' },
-    { label: '🎭 Temas', route: '/admin/themes' },
-  ];
+  const { signOut } = useAuth();
+  const { mainLinks, adminLinks, isAdmin } = useNavLinks();
 
   function handleNav(route: string) {
     router.push(route);
@@ -156,57 +192,37 @@ export default function AppShell({
 function NarrowNav() {
   const router = useRouter() as ReturnType<typeof useRouter> & { push: (r: string) => void };
   const pathname = usePathname();
-  const { signOut, role } = useAuth();
-
-  const isAdmin = role === 'ADMIN' || role === 'MODERATOR';
+  const { signOut } = useAuth();
+  const { mainLinks, adminLinks, isAdmin } = useNavLinks();
 
   function isActive(route: string) {
     if (route === '/') return pathname === '/' || pathname === '';
     return pathname.startsWith(route);
   }
 
+  const links = isAdmin ? [...mainLinks, ...adminLinks] : mainLinks;
+
   return (
     <View style={styles.narrowNav}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.narrowNavContent}>
-        <TouchableOpacity
-          style={[styles.narrowNavItem, isActive('/') && styles.narrowNavItemActive]}
-          onPress={() => router.push('/')}
-        >
-          <Text style={[styles.narrowNavText, isActive('/') && styles.narrowNavTextActive]}>
-            📖 Histórias
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.narrowNavItem, isActive('/generate') && styles.narrowNavItemActive]}
-          onPress={() => router.push('/generate')}
-        >
-          <Text style={[styles.narrowNavText, isActive('/generate') && styles.narrowNavTextActive]}>
-            ✨ Gerar
-          </Text>
-        </TouchableOpacity>
-        {isAdmin && (
-          <>
-            <TouchableOpacity
-              style={[styles.narrowNavItem, isActive('/admin/characters') && styles.narrowNavItemActive]}
-              onPress={() => router.push('/admin/characters')}
-            >
-              <Text style={[styles.narrowNavText, isActive('/admin/characters') && styles.narrowNavTextActive]}>
-                🧒 Personagens
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.narrowNavItem, isActive('/admin/themes') && styles.narrowNavItemActive]}
-              onPress={() => router.push('/admin/themes')}
-            >
-              <Text style={[styles.narrowNavText, isActive('/admin/themes') && styles.narrowNavTextActive]}>
-                🎭 Temas
-              </Text>
-            </TouchableOpacity>
-          </>
-        )}
+        {links.map((item) => (
+          <TouchableOpacity
+            key={item.route}
+            style={[styles.narrowNavItem, isActive(item.route) && styles.narrowNavItemActive]}
+            onPress={() => router.push(item.route)}
+            accessibilityRole="button"
+            accessibilityLabel={item.label}
+          >
+            <Text style={[styles.narrowNavText, isActive(item.route) && styles.narrowNavTextActive]}>
+              {item.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
         <TouchableOpacity
           style={styles.narrowNavItem}
           onPress={() => void signOut()}
+          accessibilityRole="button"
+          accessibilityLabel="Sair"
         >
           <Text style={[styles.narrowNavText, { color: '#DC2626' }]}>Sair</Text>
         </TouchableOpacity>
