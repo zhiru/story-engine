@@ -11,9 +11,9 @@ import {
 import { useRouter } from 'expo-router';
 import { useAuth } from '../auth/AuthContext';
 import { getConfig, listStories, listMyUniverses } from '../lib/api';
+import { useAppTheme } from '../theme/AppThemeContext';
 import type { StoryListItem, UniverseListItem } from '@storygen/shared';
 import AppShell from '../components/AppShell';
-import UniverseStoriesView from '../components/UniverseStoriesView';
 
 // ── SINGLE mode view ──────────────────────────────────────────────────────────
 function SingleModeView({
@@ -25,10 +25,13 @@ function SingleModeView({
 }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const router = useRouter() as any;
+  const theme = useAppTheme();
   const [stories, setStories] = useState<StoryListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const title = theme.appName ?? 'Histórias da Gigi';
 
   const load = useCallback(async () => {
     try {
@@ -53,9 +56,9 @@ function SingleModeView({
 
   if (loading) {
     return (
-      <AppShell title="Histórias da Gigi">
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color="#7C3AED" />
+      <AppShell title={title}>
+        <View style={[styles.center, { backgroundColor: theme.bg }]}>
+          <ActivityIndicator size="large" color={theme.primary} />
         </View>
       </AppShell>
     );
@@ -63,10 +66,15 @@ function SingleModeView({
 
   if (error) {
     return (
-      <AppShell title="Histórias da Gigi">
-        <View style={styles.center}>
+      <AppShell title={title}>
+        <View style={[styles.center, { backgroundColor: theme.bg }]}>
           <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={() => void load()}>
+          <TouchableOpacity
+            style={[styles.retryButton, { backgroundColor: theme.primary }]}
+            onPress={() => void load()}
+            accessibilityRole="button"
+            accessibilityLabel="Tentar novamente"
+          >
             <Text style={styles.retryText}>Tentar novamente</Text>
           </TouchableOpacity>
         </View>
@@ -75,12 +83,12 @@ function SingleModeView({
   }
 
   return (
-    <AppShell title="Histórias da Gigi">
-      <View style={styles.container}>
-        <Text style={styles.heading}>Histórias da Gigi</Text>
+    <AppShell title={title}>
+      <View style={[styles.container, { backgroundColor: theme.bg }]}>
+        <Text style={styles.heading} accessibilityRole="header">{title}</Text>
 
         <TouchableOpacity
-          style={styles.generateButton}
+          style={[styles.generateButton, { backgroundColor: theme.primary }]}
           onPress={() => router.push('/generate')}
           accessible
           accessibilityRole="button"
@@ -91,7 +99,7 @@ function SingleModeView({
 
         {stories.length === 0 ? (
           <View style={styles.centerFlex}>
-            <Text style={styles.emptyText}>Nenhuma historia disponivel ainda.</Text>
+            <Text style={styles.emptyText}>Nenhuma história disponível ainda.</Text>
           </View>
         ) : (
           <FlatList
@@ -102,7 +110,7 @@ function SingleModeView({
               <RefreshControl
                 refreshing={refreshing}
                 onRefresh={() => void handleRefresh()}
-                tintColor="#7C3AED"
+                tintColor={theme.primary}
               />
             }
             renderItem={({ item }) => (
@@ -111,7 +119,7 @@ function SingleModeView({
                 onPress={() => router.push(`/story/${item.id}`)}
                 accessible
                 accessibilityRole="button"
-                accessibilityLabel={`Ler historia: ${item.title}`}
+                accessibilityLabel={`Ler história: ${item.title}`}
               >
                 <Text style={styles.cardTitle}>{item.title}</Text>
                 <Text style={styles.cardDate}>
@@ -134,11 +142,11 @@ function SingleModeView({
 function MultiModeView({ accessToken }: { accessToken: string }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const router = useRouter() as any;
+  const theme = useAppTheme();
   const [universes, setUniverses] = useState<UniverseListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedUniverse, setSelectedUniverse] = useState<UniverseListItem | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -169,21 +177,11 @@ function MultiModeView({ accessToken }: { accessToken: string }) {
     return unsubscribe;
   }, [router, load]);
 
-  if (selectedUniverse) {
-    return (
-      <UniverseStoriesView
-        universe={selectedUniverse}
-        accessToken={accessToken}
-        onBack={() => setSelectedUniverse(null)}
-      />
-    );
-  }
-
   if (loading) {
     return (
       <AppShell title="Meus Universos">
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color="#7C3AED" />
+        <View style={[styles.center, { backgroundColor: theme.bg }]}>
+          <ActivityIndicator size="large" color={theme.primary} />
         </View>
       </AppShell>
     );
@@ -192,9 +190,14 @@ function MultiModeView({ accessToken }: { accessToken: string }) {
   if (error) {
     return (
       <AppShell title="Meus Universos">
-        <View style={styles.center}>
+        <View style={[styles.center, { backgroundColor: theme.bg }]}>
           <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={() => void load()}>
+          <TouchableOpacity
+            style={[styles.retryButton, { backgroundColor: theme.primary }]}
+            onPress={() => void load()}
+            accessibilityRole="button"
+            accessibilityLabel="Tentar novamente"
+          >
             <Text style={styles.retryText}>Tentar novamente</Text>
           </TouchableOpacity>
         </View>
@@ -204,11 +207,11 @@ function MultiModeView({ accessToken }: { accessToken: string }) {
 
   return (
     <AppShell title="Meus Universos">
-      <View style={styles.container}>
-        <Text style={styles.heading}>Meus Universos</Text>
+      <View style={[styles.container, { backgroundColor: theme.bg }]}>
+        <Text style={styles.heading} accessibilityRole="header">Meus Universos</Text>
 
         <TouchableOpacity
-          style={styles.generateButton}
+          style={[styles.generateButton, { backgroundColor: theme.primary }]}
           onPress={() => router.push('/create-universe')}
           accessible
           accessibilityRole="button"
@@ -219,7 +222,7 @@ function MultiModeView({ accessToken }: { accessToken: string }) {
 
         {universes.length === 0 ? (
           <View style={styles.centerFlex}>
-            <Text style={styles.emptyText}>Voce ainda nao tem universos. Crie um acima!</Text>
+            <Text style={styles.emptyText}>Você ainda não tem universos. Crie um acima!</Text>
           </View>
         ) : (
           <FlatList
@@ -230,13 +233,13 @@ function MultiModeView({ accessToken }: { accessToken: string }) {
               <RefreshControl
                 refreshing={refreshing}
                 onRefresh={() => void handleRefresh()}
-                tintColor="#7C3AED"
+                tintColor={theme.primary}
               />
             }
             renderItem={({ item }) => (
               <TouchableOpacity
                 style={styles.card}
-                onPress={() => setSelectedUniverse(item)}
+                onPress={() => router.push(`/universe/${item.id}`)}
                 accessible
                 accessibilityRole="button"
                 accessibilityLabel={`Abrir universo: ${item.title}`}
@@ -257,6 +260,7 @@ function MultiModeView({ accessToken }: { accessToken: string }) {
 // ── Root home screen ──────────────────────────────────────────────────────────
 export default function HomeScreen() {
   const { accessToken } = useAuth();
+  const theme = useAppTheme();
 
   const [appMode, setAppMode] = useState<'SINGLE' | 'MULTI' | null>(null);
   const [singleUniverseId, setSingleUniverseId] = useState<string | null>(null);
@@ -273,7 +277,7 @@ export default function HomeScreen() {
         setSingleUniverseId(config.singleModeUniverseId ?? null);
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Erro ao carregar configuracao.');
+      setError(e instanceof Error ? e.message : 'Erro ao carregar configuração.');
     }
   }, [accessToken]);
 
@@ -284,17 +288,22 @@ export default function HomeScreen() {
 
   if (loading || !accessToken) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#7C3AED" />
+      <View style={[styles.center, { backgroundColor: theme.bg }]}>
+        <ActivityIndicator size="large" color={theme.primary} />
       </View>
     );
   }
 
   if (error) {
     return (
-      <View style={styles.center}>
+      <View style={[styles.center, { backgroundColor: theme.bg }]}>
         <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={() => void loadConfig()}>
+        <TouchableOpacity
+          style={[styles.retryButton, { backgroundColor: theme.primary }]}
+          onPress={() => void loadConfig()}
+          accessibilityRole="button"
+          accessibilityLabel="Tentar novamente"
+        >
           <Text style={styles.retryText}>Tentar novamente</Text>
         </TouchableOpacity>
       </View>
@@ -304,8 +313,8 @@ export default function HomeScreen() {
   if (appMode === 'SINGLE') {
     if (!singleUniverseId) {
       return (
-        <View style={styles.center}>
-          <Text style={styles.errorText}>Universo nao configurado.</Text>
+        <View style={[styles.center, { backgroundColor: theme.bg }]}>
+          <Text style={styles.errorText}>Universo não configurado.</Text>
         </View>
       );
     }
@@ -317,8 +326,8 @@ export default function HomeScreen() {
   }
 
   return (
-    <View style={styles.center}>
-      <ActivityIndicator size="large" color="#7C3AED" />
+    <View style={[styles.center, { backgroundColor: theme.bg }]}>
+      <ActivityIndicator size="large" color={theme.primary} />
     </View>
   );
 }
@@ -326,14 +335,12 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAF5FF',
     paddingTop: 56,
   },
   center: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FAF5FF',
     padding: 24,
   },
   centerFlex: {
@@ -350,7 +357,6 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   generateButton: {
-    backgroundColor: '#7C3AED',
     borderRadius: 12,
     paddingVertical: 14,
     paddingHorizontal: 24,
@@ -372,7 +378,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderRadius: 16,
     padding: 20,
-    shadowColor: '#7C3AED',
+    shadowColor: '#1E1B4B',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
     shadowRadius: 8,
@@ -400,7 +406,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   retryButton: {
-    backgroundColor: '#7C3AED',
     borderRadius: 8,
     paddingVertical: 10,
     paddingHorizontal: 24,

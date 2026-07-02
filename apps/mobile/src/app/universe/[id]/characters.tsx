@@ -11,48 +11,62 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useAuth } from '../auth/AuthContext';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useAuth } from '../../../auth/AuthContext';
 import {
-  listChildProfiles,
-  createChildProfile,
-  updateChildProfile,
-  deleteChildProfile,
-  type ChildProfile,
-} from '../lib/api';
-import { useAppTheme } from '../theme/AppThemeContext';
-import AppShell from '../components/AppShell';
+  getUniverse,
+  listCharacters,
+  createCharacter,
+  updateCharacter,
+  deleteCharacter,
+} from '../../../lib/api';
+import { useAppTheme } from '../../../theme/AppThemeContext';
+import type { Character, CreateCharacterInput, UpdateCharacterInput } from '@storygen/shared';
+import AppShell from '../../../components/AppShell';
 
-type AgeBand = '0_3' | '4_6' | '7_9' | '10_12';
+type Classification = 'PRINCIPAL' | 'SECUNDARIO' | 'ANTAGONISTA' | 'MASCOTE';
 
-const AGE_BANDS: { value: AgeBand; label: string }[] = [
+const CLASSIFICATIONS: Classification[] = ['PRINCIPAL', 'SECUNDARIO', 'ANTAGONISTA', 'MASCOTE'];
+
+const CLASSIFICATION_LABELS: Record<Classification, string> = {
+  PRINCIPAL: 'Principal',
+  SECUNDARIO: 'Secundário',
+  ANTAGONISTA: 'Antagonista',
+  MASCOTE: 'Mascote',
+};
+
+const AGE_GROUPS = [
+  { value: '', label: 'Qualquer' },
   { value: '0_3', label: '0–3 anos' },
   { value: '4_6', label: '4–6 anos' },
   { value: '7_9', label: '7–9 anos' },
   { value: '10_12', label: '10–12 anos' },
 ];
 
-function ageBandLabel(value: string): string {
-  return AGE_BANDS.find((b) => b.value === value)?.label ?? value;
+function classificationColor(c: Classification, primary: string): string {
+  switch (c) {
+    case 'PRINCIPAL': return primary;
+    case 'SECUNDARIO': return '#2563EB';
+    case 'ANTAGONISTA': return '#DC2626';
+    case 'MASCOTE': return '#D97706';
+  }
 }
 
 type FormState = {
-  nickname: string;
-  ageBand: AgeBand;
-  preferences: string;
+  name: string;
+  classification: Classification;
+  ageGroup: string;
+  traits: string;
 };
 
 const emptyForm: FormState = {
-  nickname: '',
-  ageBand: '4_6',
-  preferences: '',
+  name: '',
+  classification: 'PRINCIPAL',
+  ageGroup: '',
+  traits: '',
 };
 
-function profilePreferencesText(profile: ChildProfile): string {
-  const notes = profile.preferences?.notas;
-  return typeof notes === 'string' ? notes : '';
-}
-
-function ProfileForm({
+function CharacterForm({
   initial,
   onSave,
   onCancel,
@@ -70,49 +84,48 @@ function ProfileForm({
     setForm((f) => ({ ...f, [key]: value }));
   }
 
+  const chipStyle = (active: boolean) => [
+    formStyles.chip,
+    { borderColor: theme.primarySoft },
+    active && { backgroundColor: theme.primary, borderColor: theme.primary },
+  ];
+  const chipTextStyle = (active: boolean) => [
+    formStyles.chipText,
+    { color: active ? '#ffffff' : theme.primary },
+  ];
+
   return (
     <View style={formStyles.container}>
       <View style={formStyles.field}>
-        <Text style={formStyles.label}>Apelido *</Text>
+        <Text style={formStyles.label}>Nome *</Text>
         <TextInput
           style={[
             formStyles.input,
             { backgroundColor: theme.bg, borderColor: theme.primarySoft },
           ]}
-          value={form.nickname}
-          onChangeText={(v) => set('nickname', v)}
-          placeholder="Como a criança gosta de ser chamada"
+          value={form.name}
+          onChangeText={(v) => set('name', v)}
+          placeholder="Nome do personagem"
           placeholderTextColor="#9CA3AF"
-          accessibilityLabel="Apelido da criança"
+          accessibilityLabel="Nome do personagem"
           {...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : {})}
         />
       </View>
 
       <View style={formStyles.field}>
-        <Text style={formStyles.label}>Faixa etária *</Text>
+        <Text style={formStyles.label}>Classificação</Text>
         <View style={formStyles.chipRow}>
-          {AGE_BANDS.map((band) => (
+          {CLASSIFICATIONS.map((c) => (
             <TouchableOpacity
-              key={band.value}
-              style={[
-                formStyles.chip,
-                { borderColor: theme.primarySoft },
-                form.ageBand === band.value && {
-                  backgroundColor: theme.primary,
-                  borderColor: theme.primary,
-                },
-              ]}
-              onPress={() => set('ageBand', band.value)}
+              key={c}
+              style={chipStyle(form.classification === c)}
+              onPress={() => set('classification', c)}
               accessibilityRole="button"
-              accessibilityLabel={`Faixa etária ${band.label}`}
+              accessibilityState={{ selected: form.classification === c }}
+              accessibilityLabel={`Classificação: ${CLASSIFICATION_LABELS[c]}`}
             >
-              <Text
-                style={[
-                  formStyles.chipText,
-                  { color: form.ageBand === band.value ? '#ffffff' : theme.primary },
-                ]}
-              >
-                {band.label}
+              <Text style={chipTextStyle(form.classification === c)}>
+                {CLASSIFICATION_LABELS[c]}
               </Text>
             </TouchableOpacity>
           ))}
@@ -120,17 +133,35 @@ function ProfileForm({
       </View>
 
       <View style={formStyles.field}>
-        <Text style={formStyles.label}>Preferências (opcional)</Text>
+        <Text style={formStyles.label}>Faixa etária</Text>
+        <View style={formStyles.chipRow}>
+          {AGE_GROUPS.map((ag) => (
+            <TouchableOpacity
+              key={ag.value}
+              style={chipStyle(form.ageGroup === ag.value)}
+              onPress={() => set('ageGroup', ag.value)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: form.ageGroup === ag.value }}
+              accessibilityLabel={`Faixa etária: ${ag.label}`}
+            >
+              <Text style={chipTextStyle(form.ageGroup === ag.value)}>{ag.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
+      <View style={formStyles.field}>
+        <Text style={formStyles.label}>Traços (separados por vírgula)</Text>
         <TextInput
           style={[
             formStyles.input,
             { backgroundColor: theme.bg, borderColor: theme.primarySoft },
           ]}
-          value={form.preferences}
-          onChangeText={(v) => set('preferences', v)}
-          placeholder="ex.: dinossauros, futebol, princesas..."
+          value={form.traits}
+          onChangeText={(v) => set('traits', v)}
+          placeholder="corajoso, curioso, amigável..."
           placeholderTextColor="#9CA3AF"
-          accessibilityLabel="Preferências da criança"
+          accessibilityLabel="Traços do personagem"
           {...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : {})}
         />
       </View>
@@ -154,7 +185,7 @@ function ProfileForm({
           onPress={() => onSave(form)}
           disabled={saving}
           accessibilityRole="button"
-          accessibilityLabel="Salvar perfil"
+          accessibilityLabel="Salvar personagem"
         >
           {saving ? (
             <ActivityIndicator size="small" color="#ffffff" />
@@ -167,29 +198,45 @@ function ProfileForm({
   );
 }
 
-export default function ChildProfilesScreen() {
-  const { accessToken } = useAuth();
+/**
+ * Personagens de um universo (RF-11) — dono OU admin/mod (o servidor também
+ * valida). Mesma UI de CRUD do back-office, parametrizada pelo universo da rota.
+ */
+export default function UniverseCharactersScreen() {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const router = useRouter() as any;
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const { accessToken, userId, role } = useAuth();
   const theme = useAppTheme();
 
-  const [profiles, setProfiles] = useState<ChildProfile[]>([]);
+  const [allowed, setAllowed] = useState<boolean | null>(null);
+  const [characters, setCharacters] = useState<Character[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Form state
   const [showForm, setShowForm] = useState(false);
-  const [editingProfile, setEditingProfile] = useState<ChildProfile | null>(null);
+  const [editingCharacter, setEditingCharacter] = useState<Character | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  const isPrivileged = role === 'ADMIN' || role === 'MODERATOR';
+
   const load = useCallback(async () => {
-    if (!accessToken) return;
+    if (!accessToken || !id) return;
     try {
       setError(null);
-      const list = await listChildProfiles(accessToken);
-      setProfiles(list);
+      const universe = await getUniverse(id, accessToken);
+      const canManage = universe.userId === userId || isPrivileged;
+      setAllowed(canManage);
+      if (canManage) {
+        const list = await listCharacters(id, accessToken);
+        setCharacters(list);
+      }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Erro ao carregar perfis.');
+      setError(e instanceof Error ? e.message : 'Erro ao carregar personagens.');
     }
-  }, [accessToken]);
+  }, [accessToken, id, userId, isPrivileged]);
 
   useEffect(() => {
     setLoading(true);
@@ -197,83 +244,81 @@ export default function ChildProfilesScreen() {
   }, [load]);
 
   async function handleSave(form: FormState) {
-    if (!accessToken) return;
-    if (!form.nickname.trim()) {
-      setFormError('O apelido é obrigatório.');
+    if (!id || !accessToken) return;
+    if (!form.name.trim()) {
+      setFormError('O nome é obrigatório.');
       return;
     }
     setSaving(true);
     setFormError(null);
     try {
-      const preferences = form.preferences.trim()
-        ? { notas: form.preferences.trim() }
-        : {};
+      const traits = form.traits
+        .split(',')
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0);
 
-      if (editingProfile) {
-        await updateChildProfile(
-          editingProfile.id,
-          {
-            nickname: form.nickname.trim(),
-            age_band: form.ageBand,
-            preferences,
-          },
-          accessToken,
-        );
+      if (editingCharacter) {
+        const input: UpdateCharacterInput = {
+          name: form.name.trim(),
+          classification: form.classification,
+          ageGroup: form.ageGroup || undefined,
+          traits,
+        };
+        await updateCharacter(id, editingCharacter.id, input, accessToken);
       } else {
-        await createChildProfile(
-          {
-            nickname: form.nickname.trim(),
-            age_band: form.ageBand,
-            ...(form.preferences.trim() ? { preferences } : {}),
-          },
-          accessToken,
-        );
+        const input: CreateCharacterInput = {
+          name: form.name.trim(),
+          classification: form.classification,
+          ageGroup: form.ageGroup || undefined,
+          traits,
+        };
+        await createCharacter(id, input, accessToken);
       }
       setShowForm(false);
-      setEditingProfile(null);
+      setEditingCharacter(null);
       await load();
     } catch (e: unknown) {
-      setFormError(e instanceof Error ? e.message : 'Erro ao salvar perfil.');
+      setFormError(e instanceof Error ? e.message : 'Erro ao salvar personagem.');
     } finally {
       setSaving(false);
     }
   }
 
-  function handleEdit(profile: ChildProfile) {
-    setEditingProfile(profile);
+  function handleEdit(char: Character) {
+    setEditingCharacter(char);
     setFormError(null);
     setShowForm(true);
   }
 
   function handleNew() {
-    setEditingProfile(null);
+    setEditingCharacter(null);
     setFormError(null);
     setShowForm(true);
   }
 
-  async function handleDelete(profile: ChildProfile) {
-    if (!accessToken) return;
+  async function handleDelete(char: Character) {
+    if (!id || !accessToken) return;
     const confirmed =
       Platform.OS === 'web'
-        ? window.confirm(`Excluir o perfil "${profile.nickname}"?`)
+        ? window.confirm(`Excluir "${char.name}"?`)
         : await new Promise<boolean>((resolve) => {
-            Alert.alert('Excluir perfil', `Excluir o perfil "${profile.nickname}"?`, [
+            Alert.alert('Excluir personagem', `Excluir "${char.name}"?`, [
               { text: 'Cancelar', onPress: () => resolve(false) },
               { text: 'Excluir', style: 'destructive', onPress: () => resolve(true) },
             ]);
           });
     if (!confirmed) return;
     try {
-      await deleteChildProfile(profile.id, accessToken);
+      await deleteCharacter(id, char.id, accessToken);
       await load();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Erro ao excluir perfil.');
+      setError(e instanceof Error ? e.message : 'Erro ao excluir personagem.');
     }
   }
 
-  if (loading) {
+  if (loading || (allowed === null && !error)) {
     return (
-      <AppShell title="Perfis infantis">
+      <AppShell title="Personagens">
         <View style={[styles.center, { backgroundColor: theme.bg }]}>
           <ActivityIndicator size="large" color={theme.primary} />
         </View>
@@ -283,7 +328,7 @@ export default function ChildProfilesScreen() {
 
   if (error) {
     return (
-      <AppShell title="Perfis infantis">
+      <AppShell title="Personagens">
         <View style={[styles.center, { backgroundColor: theme.bg }]}>
           <Text style={styles.errorText}>{error}</Text>
           <TouchableOpacity
@@ -299,87 +344,133 @@ export default function ChildProfilesScreen() {
     );
   }
 
-  const formInitial: FormState = editingProfile
+  if (allowed === false) {
+    return (
+      <AppShell title="Personagens">
+        <View style={[styles.center, { backgroundColor: theme.bg }]}>
+          <Text style={styles.restrictedIcon}>🔒</Text>
+          <Text style={styles.restrictedTitle}>Acesso restrito</Text>
+          <Text style={styles.restrictedText}>
+            Apenas o dono do universo (ou a moderação) pode gerenciar personagens.
+          </Text>
+        </View>
+      </AppShell>
+    );
+  }
+
+  const formInitial: FormState = editingCharacter
     ? {
-        nickname: editingProfile.nickname,
-        ageBand: editingProfile.ageBand,
-        preferences: profilePreferencesText(editingProfile),
+        name: editingCharacter.name,
+        classification: editingCharacter.classification as Classification,
+        ageGroup: editingCharacter.ageGroup ?? '',
+        traits: editingCharacter.traits.join(', '),
       }
     : emptyForm;
 
   return (
-    <AppShell title="Perfis infantis">
+    <AppShell title="Personagens">
       <ScrollView
         style={[styles.scroll, { backgroundColor: theme.bg }]}
         contentContainerStyle={styles.scrollContent}
       >
+        <TouchableOpacity
+          style={styles.backRow}
+          onPress={() => router.back()}
+          accessibilityRole="button"
+          accessibilityLabel="Voltar para o universo"
+        >
+          <Text style={[styles.backLink, { color: theme.primary }]}>← Voltar</Text>
+        </TouchableOpacity>
+
         <View style={styles.header}>
-          <Text style={styles.pageTitle}>Perfis infantis</Text>
+          <Text style={styles.pageTitle} accessibilityRole="header">Personagens</Text>
           {!showForm && (
             <TouchableOpacity
               style={[styles.addButton, { backgroundColor: theme.primary }]}
               onPress={handleNew}
               accessibilityRole="button"
-              accessibilityLabel="Novo perfil infantil"
+              accessibilityLabel="Novo personagem"
             >
               <Text style={styles.addButtonText}>+ Novo</Text>
             </TouchableOpacity>
           )}
         </View>
 
-        <Text style={styles.pageSubtitle}>
-          Cadastre as crianças para personalizar as histórias por faixa etária.
-        </Text>
-
         {showForm && (
           <View style={styles.formPanel}>
             <Text style={styles.formPanelTitle}>
-              {editingProfile ? 'Editar perfil' : 'Novo perfil'}
+              {editingCharacter ? 'Editar personagem' : 'Novo personagem'}
             </Text>
-            {formError ? <Text style={styles.formError}>{formError}</Text> : null}
-            <ProfileForm
+            {formError ? (
+              <Text style={styles.formError}>{formError}</Text>
+            ) : null}
+            <CharacterForm
               initial={formInitial}
               onSave={(f) => void handleSave(f)}
               onCancel={() => {
                 setShowForm(false);
-                setEditingProfile(null);
+                setEditingCharacter(null);
               }}
               saving={saving}
             />
           </View>
         )}
 
-        {profiles.length === 0 ? (
+        {characters.length === 0 ? (
           <View style={styles.empty}>
-            <Text style={styles.emptyText}>Nenhum perfil cadastrado ainda.</Text>
+            <Text style={styles.emptyText}>Nenhum personagem cadastrado.</Text>
           </View>
         ) : (
           <FlatList
-            data={profiles}
+            data={characters}
             keyExtractor={(item) => item.id}
             scrollEnabled={false}
             contentContainerStyle={styles.list}
             renderItem={({ item }) => (
               <View style={styles.card}>
                 <View style={styles.cardHeader}>
-                  <Text style={styles.cardName}>{item.nickname}</Text>
-                  <View style={[styles.badge, { backgroundColor: theme.primarySoft }]}>
-                    <Text style={[styles.badgeText, { color: theme.primary }]}>
-                      {ageBandLabel(item.ageBand)}
+                  <Text style={styles.cardName}>{item.name}</Text>
+                  <View
+                    style={[
+                      styles.badge,
+                      {
+                        backgroundColor:
+                          classificationColor(
+                            item.classification as Classification,
+                            theme.primary,
+                          ) + '22',
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.badgeText,
+                        {
+                          color: classificationColor(
+                            item.classification as Classification,
+                            theme.primary,
+                          ),
+                        },
+                      ]}
+                    >
+                      {CLASSIFICATION_LABELS[item.classification as Classification]}
                     </Text>
                   </View>
                 </View>
-                {profilePreferencesText(item) ? (
+                {item.ageGroup ? (
                   <Text style={styles.cardMeta}>
-                    Preferências: {profilePreferencesText(item)}
+                    Faixa etária: {AGE_GROUPS.find((ag) => ag.value === item.ageGroup)?.label ?? item.ageGroup}
                   </Text>
+                ) : null}
+                {item.traits.length > 0 ? (
+                  <Text style={styles.cardMeta}>Traços: {item.traits.join(', ')}</Text>
                 ) : null}
                 <View style={styles.cardActions}>
                   <TouchableOpacity
                     style={[styles.editButton, { backgroundColor: theme.primarySoft }]}
                     onPress={() => handleEdit(item)}
                     accessibilityRole="button"
-                    accessibilityLabel={`Editar perfil ${item.nickname}`}
+                    accessibilityLabel={`Editar personagem ${item.name}`}
                   >
                     <Text style={[styles.editButtonText, { color: theme.primary }]}>
                       Editar
@@ -389,7 +480,7 @@ export default function ChildProfilesScreen() {
                     style={styles.deleteButton}
                     onPress={() => void handleDelete(item)}
                     accessibilityRole="button"
-                    accessibilityLabel={`Excluir perfil ${item.nickname}`}
+                    accessibilityLabel={`Excluir personagem ${item.name}`}
                   >
                     <Text style={styles.deleteButtonText}>Excluir</Text>
                   </TouchableOpacity>
@@ -486,21 +577,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 24,
   },
+  backRow: {
+    marginBottom: 12,
+  },
+  backLink: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 6,
+    marginBottom: 20,
   },
   pageTitle: {
     fontSize: 26,
     fontWeight: '800',
     color: '#1E1B4B',
-  },
-  pageSubtitle: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginBottom: 20,
   },
   addButton: {
     borderRadius: 10,
@@ -624,5 +717,21 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontWeight: '700',
     fontSize: 15,
+  },
+  restrictedIcon: {
+    fontSize: 48,
+    marginBottom: 12,
+  },
+  restrictedTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#1E1B4B',
+    marginBottom: 8,
+  },
+  restrictedText: {
+    fontSize: 15,
+    color: '#6B7280',
+    textAlign: 'center',
+    maxWidth: 300,
   },
 });

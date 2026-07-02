@@ -47,15 +47,32 @@ async function clearTokens() {
   }
 }
 
-async function fetchAndApplyRole(
+async function fetchAndApplyMe(
   accessToken: string,
   setState: React.Dispatch<React.SetStateAction<AuthState>>,
 ): Promise<void> {
   try {
     const me = await getMe(accessToken);
-    setState((s) => ({ ...s, role: me.role, email: me.email, userId: me.id }));
+    // RF-02: consentimento é derivado do servidor (has_parental_consent) —
+    // um responsável que já consentiu não revê o gate em outro dispositivo.
+    // O SecureStore fica só como cache otimista para o boot offline.
+    setState((s) => ({
+      ...s,
+      role: me.role,
+      email: me.email,
+      userId: me.id,
+      hasConsent: me.has_parental_consent,
+    }));
+    try {
+      await SecureStore.setItemAsync(
+        HAS_CONSENT_KEY,
+        me.has_parental_consent ? 'true' : 'false',
+      );
+    } catch {
+      // acceptable on web
+    }
   } catch {
-    // tolerate failure — role stays null
+    // tolerate failure — role stays null and hasConsent keeps the cached value
   }
 }
 
@@ -91,7 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               hasConsent,
               isLoading: false,
             }));
-            void fetchAndApplyRole(tokens.access_token, setState);
+            void fetchAndApplyMe(tokens.access_token, setState);
             return;
           } catch {
             // Refresh failed — clear tokens and go to login
@@ -113,7 +130,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
     }));
-    void fetchAndApplyRole(tokens.access_token, setState);
+    // Aguarda /me para derivar hasConsent do servidor antes do gate navegar
+    await fetchAndApplyMe(tokens.access_token, setState);
   }, []);
 
   const registerFn = useCallback(async (input: RegisterInput) => {
@@ -124,7 +142,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
     }));
-    void fetchAndApplyRole(tokens.access_token, setState);
+    // Aguarda /me para derivar hasConsent do servidor antes do gate navegar
+    await fetchAndApplyMe(tokens.access_token, setState);
   }, []);
 
   const signOut = useCallback(async () => {

@@ -43,6 +43,7 @@ async function seedStory(
     storyArcId?: string;
     createdAt?: Date;
     title?: string;
+    metadataWeather?: Record<string, unknown>;
   } = {},
 ) {
   const [row] = await db
@@ -57,6 +58,7 @@ async function seedStory(
       ...(opts.visibility && { visibility: opts.visibility }),
       ...(opts.storyArcId && { storyArcId: opts.storyArcId }),
       ...(opts.createdAt && { createdAt: opts.createdAt }),
+      ...(opts.metadataWeather && { metadataWeather: opts.metadataWeather }),
     })
     .returning();
   return row!;
@@ -281,6 +283,51 @@ describe("GET /api/v1/stories/:id", () => {
     const body = res.json();
     expect(body.id).toBe(story.id);
     expect(body.content).toBeTruthy();
+  });
+
+  it("includes user_id, visibility and metadata_weather", async () => {
+    const owner = await seedUser({ email: "owner@x.com" });
+    const reader = await seedUser({ email: "reader@x.com" });
+    const universe = await seedUniverse(owner.id);
+    const weather = {
+      temp: 23,
+      condition: "Ensolarado",
+      time: "Tarde",
+      source: "fallback",
+    };
+    const story = await seedStory(universe.id, owner.id, "APPROVED", {
+      visibility: "PUBLIC",
+      metadataWeather: weather,
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/stories/${story.id}`,
+      headers: bearerHeader(reader.id),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.user_id).toBe(owner.id);
+    expect(body.visibility).toBe("PUBLIC");
+    expect(body.metadata_weather).toEqual(weather);
+  });
+
+  it("returns metadata_weather null when the story has none", async () => {
+    const owner = await seedUser({ email: "owner@x.com" });
+    const universe = await seedUniverse(owner.id);
+    const story = await seedStory(universe.id, owner.id, "APPROVED");
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/stories/${story.id}`,
+      headers: bearerHeader(owner.id),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.metadata_weather).toBeNull();
+    expect(body.visibility).toBe("PRIVATE"); // default do schema
   });
 
   it("returns 404 for PENDING story to non-owner", async () => {

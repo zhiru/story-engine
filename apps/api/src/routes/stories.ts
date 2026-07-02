@@ -177,6 +177,8 @@ export async function storyRoutes(app: FastifyInstance): Promise<void> {
   /**
    * GET /api/v1/stories/:id
    * Returns a single story (APPROVED, or owner/admin for PENDING).
+   * Inclui gerador (user_id), visibility e metadata_weather (SDD §7.2) para
+   * a tela de detalhe: chip de clima + controle de visibilidade do gerador.
    */
   app.get(
     "/stories/:id",
@@ -194,6 +196,9 @@ export async function storyRoutes(app: FastifyInstance): Promise<void> {
         content: story.content,
         moderationStatus: story.moderationStatus,
         createdAt: story.createdAt.toISOString(),
+        user_id: story.userId,
+        visibility: story.visibility,
+        metadata_weather: story.metadataWeather ?? null,
       });
     },
   );

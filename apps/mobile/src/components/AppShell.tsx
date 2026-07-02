@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
+  Image,
   TouchableOpacity,
   StyleSheet,
   useWindowDimensions,
@@ -9,6 +10,7 @@ import {
 } from 'react-native';
 import { useRouter, usePathname } from 'expo-router';
 import { useAuth } from '../auth/AuthContext';
+import { useAppTheme } from '../theme/AppThemeContext';
 import { getConfig } from '../lib/api';
 
 const SIDEBAR_WIDTH = 230;
@@ -113,6 +115,35 @@ function useMainLinks(): NavItem[] {
   ];
 }
 
+/** Marca do app: logo (theme.logo_url) + nome (theme.app_name), quando presentes. */
+function AppBrand({ compact = false }: { compact?: boolean }) {
+  const theme = useAppTheme();
+  const name = theme.appName ?? 'StoryGen';
+
+  return (
+    <View style={styles.brandRow}>
+      {theme.logoUrl ? (
+        <Image
+          source={{ uri: theme.logoUrl }}
+          style={compact ? styles.brandLogoCompact : styles.brandLogo}
+          resizeMode="contain"
+          accessibilityRole="image"
+          accessibilityLabel={`Logotipo de ${name}`}
+        />
+      ) : null}
+      <Text
+        style={[
+          compact ? styles.topBarTitle : styles.appTitle,
+          { color: theme.primary },
+        ]}
+        numberOfLines={1}
+      >
+        {name}
+      </Text>
+    </View>
+  );
+}
+
 function SidebarContent({
   onNav,
 }: {
@@ -121,6 +152,7 @@ function SidebarContent({
   const router = useRouter() as ReturnType<typeof useRouter> & { push: (r: string) => void };
   const pathname = usePathname();
   const { signOut, role } = useAuth();
+  const theme = useAppTheme();
 
   const adminGroups = buildAdminGroups(role);
   const mainLinks = useMainLinks();
@@ -137,8 +169,8 @@ function SidebarContent({
 
   return (
     <View style={styles.sidebarInner}>
-      <View style={styles.sidebarHeader}>
-        <Text style={styles.appTitle}>StoryGen</Text>
+      <View style={[styles.sidebarHeader, { borderBottomColor: theme.primarySoft }]}>
+        <AppBrand />
       </View>
 
       <ScrollView style={styles.navScroll} showsVerticalScrollIndicator={false}>
@@ -146,7 +178,10 @@ function SidebarContent({
           {mainLinks.map((item) => (
             <TouchableOpacity
               key={item.route}
-              style={[styles.navItem, isActive(item.route) && styles.navItemActive]}
+              style={[
+                styles.navItem,
+                isActive(item.route) && { backgroundColor: theme.primarySoft },
+              ]}
               onPress={() => handleNav(item.route)}
               accessibilityRole="button"
               accessibilityLabel={item.label}
@@ -154,7 +189,10 @@ function SidebarContent({
               <Text
                 style={[
                   styles.navItemText,
-                  isActive(item.route) && styles.navItemTextActive,
+                  isActive(item.route) && [
+                    styles.navItemTextActive,
+                    { color: theme.primary },
+                  ],
                 ]}
               >
                 {item.label}
@@ -172,7 +210,10 @@ function SidebarContent({
                 {group.items.map((item) => (
                   <TouchableOpacity
                     key={item.route}
-                    style={[styles.navItem, isActive(item.route) && styles.navItemActive]}
+                    style={[
+                      styles.navItem,
+                      isActive(item.route) && { backgroundColor: theme.primarySoft },
+                    ]}
                     onPress={() => handleNav(item.route)}
                     accessibilityRole="button"
                     accessibilityLabel={item.label}
@@ -180,7 +221,10 @@ function SidebarContent({
                     <Text
                       style={[
                         styles.navItemText,
-                        isActive(item.route) && styles.navItemTextActive,
+                        isActive(item.route) && [
+                          styles.navItemTextActive,
+                          { color: theme.primary },
+                        ],
                       ]}
                     >
                       {item.label}
@@ -193,7 +237,7 @@ function SidebarContent({
         )}
       </ScrollView>
 
-      <View style={styles.sidebarFooter}>
+      <View style={[styles.sidebarFooter, { borderTopColor: theme.primarySoft }]}>
         <TouchableOpacity
           style={styles.signOutButton}
           onPress={() => void signOut()}
@@ -215,12 +259,13 @@ export default function AppShell({
   children: React.ReactNode;
 }) {
   const { width } = useWindowDimensions();
+  const theme = useAppTheme();
   const isWide = width >= BREAKPOINT;
 
   if (isWide) {
     return (
-      <View style={styles.rootWide}>
-        <View style={styles.sidebar}>
+      <View style={[styles.rootWide, { backgroundColor: theme.bg }]}>
+        <View style={[styles.sidebar, { borderRightColor: theme.primarySoft }]}>
           <SidebarContent />
         </View>
         <View style={styles.content}>
@@ -230,11 +275,15 @@ export default function AppShell({
     );
   }
 
-  // Narrow: top bar with title + nav links row
+  // Narrow: top bar with brand + title + nav links row
   return (
-    <View style={styles.rootNarrow}>
-      <View style={styles.topBar}>
-        <Text style={styles.topBarTitle}>{title}</Text>
+    <View style={[styles.rootNarrow, { backgroundColor: theme.bg }]}>
+      <View style={[styles.topBar, { borderBottomColor: theme.primarySoft }]}>
+        {theme.logoUrl || theme.appName ? (
+          <AppBrand compact />
+        ) : (
+          <Text style={[styles.topBarTitle, { color: theme.primary }]}>{title}</Text>
+        )}
       </View>
       <NarrowNav />
       <View style={styles.contentNarrow}>
@@ -248,6 +297,7 @@ function NarrowNav() {
   const router = useRouter() as ReturnType<typeof useRouter> & { push: (r: string) => void };
   const pathname = usePathname();
   const { signOut, role } = useAuth();
+  const theme = useAppTheme();
 
   const adminLinks = buildAdminGroups(role).flatMap((group) => group.items);
   const mainLinks = useMainLinks();
@@ -260,17 +310,28 @@ function NarrowNav() {
   const links = [...mainLinks, ...adminLinks];
 
   return (
-    <View style={styles.narrowNav}>
+    <View style={[styles.narrowNav, { borderBottomColor: theme.primarySoft }]}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.narrowNavContent}>
         {links.map((item) => (
           <TouchableOpacity
             key={item.route}
-            style={[styles.narrowNavItem, isActive(item.route) && styles.narrowNavItemActive]}
+            style={[
+              styles.narrowNavItem,
+              isActive(item.route) && { backgroundColor: theme.primarySoft },
+            ]}
             onPress={() => router.push(item.route)}
             accessibilityRole="button"
             accessibilityLabel={item.label}
           >
-            <Text style={[styles.narrowNavText, isActive(item.route) && styles.narrowNavTextActive]}>
+            <Text
+              style={[
+                styles.narrowNavText,
+                isActive(item.route) && [
+                  styles.narrowNavTextActive,
+                  { color: theme.primary },
+                ],
+              ]}
+            >
               {item.label}
             </Text>
           </TouchableOpacity>
@@ -293,13 +354,11 @@ const styles = StyleSheet.create({
   rootWide: {
     flex: 1,
     flexDirection: 'row',
-    backgroundColor: '#FAF5FF',
   },
   sidebar: {
     width: SIDEBAR_WIDTH,
     backgroundColor: '#ffffff',
     borderRightWidth: 1,
-    borderRightColor: '#EDE9FE',
   },
   sidebarInner: {
     flex: 1,
@@ -310,13 +369,27 @@ const styles = StyleSheet.create({
     paddingTop: 28,
     paddingBottom: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#EDE9FE',
+  },
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  brandLogo: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+  },
+  brandLogoCompact: {
+    width: 26,
+    height: 26,
+    borderRadius: 6,
   },
   appTitle: {
     fontSize: 22,
     fontWeight: '800',
-    color: '#7C3AED',
     letterSpacing: -0.5,
+    flexShrink: 1,
   },
   navScroll: {
     flex: 1,
@@ -338,7 +411,7 @@ const styles = StyleSheet.create({
   groupLabel: {
     fontSize: 10,
     fontWeight: '700',
-    color: '#C4B5FD',
+    color: '#9CA3AF',
     textTransform: 'uppercase',
     letterSpacing: 0.6,
     paddingHorizontal: 20,
@@ -351,22 +424,17 @@ const styles = StyleSheet.create({
     marginHorizontal: 8,
     borderRadius: 8,
   },
-  navItemActive: {
-    backgroundColor: '#EDE9FE',
-  },
   navItemText: {
     fontSize: 15,
     color: '#374151',
     fontWeight: '500',
   },
   navItemTextActive: {
-    color: '#7C3AED',
     fontWeight: '700',
   },
   sidebarFooter: {
     padding: 16,
     borderTopWidth: 1,
-    borderTopColor: '#EDE9FE',
   },
   signOutButton: {
     paddingVertical: 10,
@@ -386,12 +454,10 @@ const styles = StyleSheet.create({
   // Narrow layout
   rootNarrow: {
     flex: 1,
-    backgroundColor: '#FAF5FF',
   },
   topBar: {
     backgroundColor: '#ffffff',
     borderBottomWidth: 1,
-    borderBottomColor: '#EDE9FE',
     paddingHorizontal: 16,
     paddingTop: 52,
     paddingBottom: 12,
@@ -399,12 +465,11 @@ const styles = StyleSheet.create({
   topBarTitle: {
     fontSize: 20,
     fontWeight: '800',
-    color: '#7C3AED',
+    flexShrink: 1,
   },
   narrowNav: {
     backgroundColor: '#ffffff',
     borderBottomWidth: 1,
-    borderBottomColor: '#EDE9FE',
   },
   narrowNavContent: {
     paddingHorizontal: 8,
@@ -416,16 +481,12 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     borderRadius: 8,
   },
-  narrowNavItemActive: {
-    backgroundColor: '#EDE9FE',
-  },
   narrowNavText: {
     fontSize: 13,
     color: '#374151',
     fontWeight: '500',
   },
   narrowNavTextActive: {
-    color: '#7C3AED',
     fontWeight: '700',
   },
   contentNarrow: {

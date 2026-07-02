@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useAuth } from '../auth/AuthContext';
 import { getMeSubscription, getMeUsage } from '../lib/api';
+import { useAppTheme } from '../theme/AppThemeContext';
 import type { MeSubscriptionResponse, MeUsageResponse } from '@storygen/shared';
 import AppShell from '../components/AppShell';
 
@@ -55,19 +56,25 @@ function UsageBar({
   used: number;
   limit: number | null;
 }) {
+  const theme = useAppTheme();
   const ratio = limit && limit > 0 ? Math.min(used / limit, 1) : 0;
   const over = limit !== null && used >= limit;
   return (
     <View style={styles.usageItem}>
       <View style={styles.usageLabelRow}>
         <Text style={styles.usageLabel}>{label}</Text>
-        <Text style={[styles.usageCount, over && styles.usageCountOver]}>
+        <Text
+          style={[
+            styles.usageCount,
+            { color: over ? '#DC2626' : theme.primary },
+          ]}
+        >
           {limit !== null ? `${used}/${limit}` : `${used}`}
         </Text>
       </View>
       {limit !== null ? (
         <View
-          style={styles.usageTrack}
+          style={[styles.usageTrack, { backgroundColor: theme.primarySoft }]}
           accessibilityRole="progressbar"
           accessibilityLabel={`${label}: ${used} de ${limit}`}
         >
@@ -75,7 +82,7 @@ function UsageBar({
             style={[
               styles.usageFill,
               { width: `${ratio * 100}%` },
-              over && styles.usageFillOver,
+              { backgroundColor: over ? '#DC2626' : theme.primary },
             ]}
           />
         </View>
@@ -86,6 +93,7 @@ function UsageBar({
 
 export default function SubscriptionScreen() {
   const { accessToken } = useAuth();
+  const theme = useAppTheme();
 
   const [subscription, setSubscription] = useState<MeSubscriptionResponse['subscription']>(null);
   const [usage, setUsage] = useState<MeUsageResponse | null>(null);
@@ -115,8 +123,8 @@ export default function SubscriptionScreen() {
   if (loading) {
     return (
       <AppShell title="Assinatura">
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color="#7C3AED" />
+        <View style={[styles.center, { backgroundColor: theme.bg }]}>
+          <ActivityIndicator size="large" color={theme.primary} />
         </View>
       </AppShell>
     );
@@ -125,9 +133,14 @@ export default function SubscriptionScreen() {
   if (error) {
     return (
       <AppShell title="Assinatura">
-        <View style={styles.center}>
+        <View style={[styles.center, { backgroundColor: theme.bg }]}>
           <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.primaryButton} onPress={() => void load()}>
+          <TouchableOpacity
+            style={[styles.primaryButton, { backgroundColor: theme.primary }]}
+            onPress={() => void load()}
+            accessibilityRole="button"
+            accessibilityLabel="Tentar novamente"
+          >
             <Text style={styles.primaryButtonText}>Tentar novamente</Text>
           </TouchableOpacity>
         </View>
@@ -140,7 +153,10 @@ export default function SubscriptionScreen() {
 
   return (
     <AppShell title="Assinatura">
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        style={[styles.scroll, { backgroundColor: theme.bg }]}
+        contentContainerStyle={styles.scrollContent}
+      >
         <Text style={styles.pageTitle}>Assinatura</Text>
         <Text style={styles.pageSubtitle}>Seu plano e o uso deste mês</Text>
 
@@ -156,7 +172,7 @@ export default function SubscriptionScreen() {
                 </View>
               ) : null}
             </View>
-            <Text style={styles.planPrice}>
+            <Text style={[styles.planPrice, { color: theme.primary }]}>
               {formatPrice(subscription.plan.price_cents)}
               <Text style={styles.planPriceSuffix}> /mês</Text>
             </Text>
@@ -166,13 +182,15 @@ export default function SubscriptionScreen() {
 
             {manageUrl ? (
               <TouchableOpacity
-                style={styles.manageButton}
+                style={[styles.manageButton, { backgroundColor: theme.primarySoft }]}
                 onPress={() => void Linking.openURL(manageUrl)}
                 accessible
                 accessibilityRole="button"
                 accessibilityLabel="Gerenciar assinatura na loja"
               >
-                <Text style={styles.manageButtonText}>Gerenciar assinatura</Text>
+                <Text style={[styles.manageButtonText, { color: theme.primary }]}>
+                  Gerenciar assinatura
+                </Text>
               </TouchableOpacity>
             ) : (
               <Text style={styles.manageHint}>
@@ -217,7 +235,6 @@ export default function SubscriptionScreen() {
 const styles = StyleSheet.create({
   scroll: {
     flex: 1,
-    backgroundColor: '#FAF5FF',
   },
   scrollContent: {
     padding: 24,
@@ -227,7 +244,6 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FAF5FF',
     padding: 24,
   },
   pageTitle: {
@@ -246,7 +262,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
-    shadowColor: '#7C3AED',
+    shadowColor: '#1E1B4B',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
     shadowRadius: 8,
@@ -278,7 +294,6 @@ const styles = StyleSheet.create({
   planPrice: {
     fontSize: 26,
     fontWeight: '800',
-    color: '#7C3AED',
     marginBottom: 4,
   },
   planPriceSuffix: {
@@ -292,14 +307,12 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   manageButton: {
-    backgroundColor: '#EDE9FE',
     borderRadius: 10,
     paddingVertical: 12,
     alignItems: 'center',
   },
   manageButtonText: {
     fontSize: 15,
-    color: '#7C3AED',
     fontWeight: '700',
   },
   manageHint: {
@@ -322,7 +335,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderRadius: 16,
     padding: 20,
-    shadowColor: '#7C3AED',
+    shadowColor: '#1E1B4B',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
     shadowRadius: 8,
@@ -349,25 +362,16 @@ const styles = StyleSheet.create({
   },
   usageCount: {
     fontSize: 14,
-    color: '#7C3AED',
     fontWeight: '700',
-  },
-  usageCountOver: {
-    color: '#DC2626',
   },
   usageTrack: {
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#EDE9FE',
     overflow: 'hidden',
   },
   usageFill: {
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#7C3AED',
-  },
-  usageFillOver: {
-    backgroundColor: '#DC2626',
   },
   usageHint: {
     fontSize: 13,
@@ -381,7 +385,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   primaryButton: {
-    backgroundColor: '#7C3AED',
     borderRadius: 10,
     paddingVertical: 12,
     paddingHorizontal: 24,

@@ -4,6 +4,7 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import { useEffect } from 'react';
 
 import { AuthProvider, useAuth } from '../auth/AuthContext';
+import { AppThemeProvider } from '../theme/AppThemeContext';
 
 function NavigationGate() {
   const { accessToken, hasConsent, isLoading } = useAuth();
@@ -32,8 +33,10 @@ function NavigationGate() {
 export default function RootLayout() {
   return (
     <AuthProvider>
-      <NavigationGate />
-      <Stack screenOptions={{ headerShown: false }} />
+      <AppThemeProvider>
+        <NavigationGate />
+        <Stack screenOptions={{ headerShown: false }} />
+      </AppThemeProvider>
     </AuthProvider>
   );
 }

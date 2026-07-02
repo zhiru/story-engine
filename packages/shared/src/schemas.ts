@@ -49,6 +49,21 @@ export const StorySchema = z.object({
   content: z.string(),
   moderationStatus: z.enum(["PENDING", "APPROVED", "REJECTED"]),
   createdAt: z.string().datetime({ offset: true }),
+  // Campos adicionais do detalhe (snake_case como no envelope da API).
+  // Opcionais para manter compatibilidade com respostas antigas.
+  user_id: z.string().uuid().optional(),
+  visibility: z.enum(["PUBLIC", "PRIVATE", "PAID"]).optional(),
+  // SDD §7.2 — {temp, condition, time, source}; jsonb livre no banco,
+  // então o schema é tolerante (source opcional, null quando ausente).
+  metadata_weather: z
+    .object({
+      temp: z.number(),
+      condition: z.string(),
+      time: z.string(),
+      source: z.string().optional(),
+    })
+    .nullable()
+    .optional(),
 });
 export type Story = z.infer<typeof StorySchema>;
 

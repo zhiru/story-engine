@@ -12,6 +12,7 @@ import {
   type GenerateStoryInput,
   type UniverseListItem,
   type CreateUniverseInput,
+  type UpdateUniverseInput,
   type CreateCharacterInput,
   type CreateThemeInput,
   type UpdateCharacterInput,
@@ -63,10 +64,45 @@ export class ApiError extends Error {
     public code: string,
     message: string,
     public status: number,
+    /** request_id do envelope de erro (SDD §7) — útil para suporte. */
+    public requestId?: string,
+    /** Detalhes estruturados (ex.: { limit } em QUOTA_EXCEEDED). */
+    public details?: unknown,
   ) {
     super(message);
     this.name = "ApiError";
   }
+}
+
+// Envelope padrão de erro da API (SDD §7):
+// { error: { code, message, request_id, details? } }
+type ErrorPayload = {
+  error?:
+    | { code?: string; message?: string; request_id?: string; details?: unknown }
+    | string;
+};
+
+async function throwHttpError(res: Response): Promise<never> {
+  let payload: ErrorPayload | undefined;
+  try {
+    payload = (await res.json()) as ErrorPayload;
+  } catch {
+    payload = undefined;
+  }
+  if (payload && typeof payload.error === "object" && payload.error !== null) {
+    throw new ApiError(
+      payload.error.code ?? "UNKNOWN",
+      payload.error.message ?? `HTTP ${res.status}`,
+      res.status,
+      payload.error.request_id,
+      payload.error.details,
+    );
+  }
+  const msg =
+    payload && typeof payload.error === "string"
+      ? payload.error
+      : `HTTP ${res.status}`;
+  throw new ApiError("UNKNOWN", msg, res.status);
 }
 
 async function post<T>(
@@ -84,23 +120,7 @@ async function post<T>(
     headers,
     body: JSON.stringify(body),
   });
-  if (!res.ok) {
-    const payload = (await res.json()) as
-      | { error?: { code?: string; message?: string } | string }
-      | undefined;
-    if (payload && typeof payload.error === "object" && payload.error !== null) {
-      throw new ApiError(
-        payload.error.code ?? "UNKNOWN",
-        payload.error.message ?? `HTTP ${res.status}`,
-        res.status,
-      );
-    }
-    const msg =
-      payload && typeof payload.error === "string"
-        ? payload.error
-        : `HTTP ${res.status}`;
-    throw new ApiError("UNKNOWN", msg, res.status);
-  }
+  if (!res.ok) return throwHttpError(res);
   return res.json() as Promise<T>;
 }
 
@@ -130,23 +150,7 @@ async function get<T>(path: string, accessToken: string): Promise<T> {
       "X-App-Slug": appSlug,
     },
   });
-  if (!res.ok) {
-    const payload = (await res.json()) as
-      | { error?: { code?: string; message?: string } | string }
-      | undefined;
-    if (payload && typeof payload.error === "object" && payload.error !== null) {
-      throw new ApiError(
-        payload.error.code ?? "UNKNOWN",
-        payload.error.message ?? `HTTP ${res.status}`,
-        res.status,
-      );
-    }
-    const msg =
-      payload && typeof payload.error === "string"
-        ? payload.error
-        : `HTTP ${res.status}`;
-    throw new ApiError("UNKNOWN", msg, res.status);
-  }
+  if (!res.ok) return throwHttpError(res);
   return res.json() as Promise<T>;
 }
 
@@ -165,23 +169,7 @@ async function patch<T>(
     headers,
     body: JSON.stringify(body),
   });
-  if (!res.ok) {
-    const payload = (await res.json()) as
-      | { error?: { code?: string; message?: string } | string }
-      | undefined;
-    if (payload && typeof payload.error === "object" && payload.error !== null) {
-      throw new ApiError(
-        payload.error.code ?? "UNKNOWN",
-        payload.error.message ?? `HTTP ${res.status}`,
-        res.status,
-      );
-    }
-    const msg =
-      payload && typeof payload.error === "string"
-        ? payload.error
-        : `HTTP ${res.status}`;
-    throw new ApiError("UNKNOWN", msg, res.status);
-  }
+  if (!res.ok) return throwHttpError(res);
   return res.json() as Promise<T>;
 }
 
@@ -200,23 +188,7 @@ async function put<T>(
     headers,
     body: JSON.stringify(body),
   });
-  if (!res.ok) {
-    const payload = (await res.json()) as
-      | { error?: { code?: string; message?: string } | string }
-      | undefined;
-    if (payload && typeof payload.error === "object" && payload.error !== null) {
-      throw new ApiError(
-        payload.error.code ?? "UNKNOWN",
-        payload.error.message ?? `HTTP ${res.status}`,
-        res.status,
-      );
-    }
-    const msg =
-      payload && typeof payload.error === "string"
-        ? payload.error
-        : `HTTP ${res.status}`;
-    throw new ApiError("UNKNOWN", msg, res.status);
-  }
+  if (!res.ok) return throwHttpError(res);
   return res.json() as Promise<T>;
 }
 
@@ -235,23 +207,7 @@ async function del<T>(
     headers,
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
-  if (!res.ok) {
-    const payload = (await res.json()) as
-      | { error?: { code?: string; message?: string } | string }
-      | undefined;
-    if (payload && typeof payload.error === "object" && payload.error !== null) {
-      throw new ApiError(
-        payload.error.code ?? "UNKNOWN",
-        payload.error.message ?? `HTTP ${res.status}`,
-        res.status,
-      );
-    }
-    const msg =
-      payload && typeof payload.error === "string"
-        ? payload.error
-        : `HTTP ${res.status}`;
-    throw new ApiError("UNKNOWN", msg, res.status);
-  }
+  if (!res.ok) return throwHttpError(res);
   // DELETE may return 204 No Content
   const text = await res.text();
   if (!text) return undefined as unknown as T;
@@ -275,6 +231,26 @@ export async function listStories(
 
 export async function getStory(id: string, accessToken: string): Promise<Story> {
   return get<Story>(`/stories/${id}`, accessToken);
+}
+
+// PATCH /stories/:id — apenas o gerador altera a visibilidade (SDD §6.4).
+// PUBLIC exige moderação APPROVED → 422 CONTENT_NOT_APPROVED.
+export interface UpdateStoryVisibilityResult {
+  id: string;
+  visibility: "PUBLIC" | "PRIVATE" | "PAID";
+  moderation_status: "PENDING" | "APPROVED" | "REJECTED";
+}
+
+export async function updateStoryVisibility(
+  id: string,
+  visibility: "PUBLIC" | "PRIVATE" | "PAID",
+  accessToken: string,
+): Promise<UpdateStoryVisibilityResult> {
+  return patch<UpdateStoryVisibilityResult>(
+    `/stories/${id}`,
+    { visibility },
+    accessToken,
+  );
 }
 
 export interface GenerateStoryResult {
@@ -697,6 +673,7 @@ export interface UniverseDetail {
   title: string;
   description: string;
   visibility: "PUBLIC" | "PRIVATE" | "PAID";
+  locationContext?: string | null;
   createdAt: string;
 }
 
@@ -705,6 +682,23 @@ export async function getUniverse(
   accessToken: string,
 ): Promise<UniverseDetail> {
   return get<UniverseDetail>(`/universes/${universeId}`, accessToken);
+}
+
+// PATCH /universes/:id — dono (MULTI) ou admin/mod (RF-10, WP-C).
+export async function updateUniverse(
+  universeId: string,
+  input: UpdateUniverseInput,
+  accessToken: string,
+): Promise<UniverseDetail> {
+  return patch<UniverseDetail>(`/universes/${universeId}`, input, accessToken);
+}
+
+// DELETE /universes/:id — soft-delete em cascata (universo + filhos).
+export async function deleteUniverse(
+  universeId: string,
+  accessToken: string,
+): Promise<void> {
+  await del<{ ok: true }>(`/universes/${universeId}`, accessToken);
 }
 
 // ── Child profiles (RF-03) ───────────────────────────────────────────────────

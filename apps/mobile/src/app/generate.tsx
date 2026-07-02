@@ -25,6 +25,7 @@ import {
   type ChildProfile,
   type GenerateStoryResult,
 } from '../lib/api';
+import { useAppTheme } from '../theme/AppThemeContext';
 import type { Theme, UniverseListItem } from '@storygen/shared';
 import AppShell from '../components/AppShell';
 
@@ -48,6 +49,7 @@ export default function GenerateScreen() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const router = useRouter() as any;
   const { accessToken } = useAuth();
+  const appTheme = useAppTheme();
   const params = useLocalSearchParams<{ universe?: string | string[] }>();
   const universeParam = Array.isArray(params.universe)
     ? params.universe[0]
@@ -80,6 +82,17 @@ export default function GenerateScreen() {
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [result, setResult] = useState<GenerateStoryResult | null>(null);
+
+  // Chips reutilizáveis com o accent do tema remoto (ADR-06)
+  const chipStyle = (active: boolean) => [
+    styles.themeChip,
+    { borderColor: appTheme.primarySoft },
+    active && { backgroundColor: appTheme.primary, borderColor: appTheme.primary },
+  ];
+  const chipTextStyle = (active: boolean) => [
+    styles.themeChipText,
+    { color: active ? '#ffffff' : appTheme.primary },
+  ];
 
   // Resolve o universo: ?universe= (MULTI) > singleModeUniverseId (SINGLE).
   // Em MULTI sem parâmetro, lista os universos do usuário para escolha.
@@ -199,8 +212,17 @@ export default function GenerateScreen() {
       setResult(generated);
     } catch (e: unknown) {
       if (e instanceof ApiError) {
-        if (e.status === 402) {
-          setGenerateError('Você atingiu o limite de histórias do seu plano este mês.');
+        if (e.code === 'SUSPENDED') {
+          // Mensagem do servidor traz o prazo da suspensão — exibir como está.
+          setGenerateError(e.message);
+        } else if (e.status === 402 || e.code === 'QUOTA_EXCEEDED') {
+          // O servidor manda a mensagem pt-BR com o limite; o valor numérico
+          // também vem em error.details.limit quando aplicável.
+          const limit = (e.details as { limit?: number } | undefined)?.limit;
+          setGenerateError(
+            e.message ||
+              `Você atingiu o limite${limit != null ? ` de ${limit}` : ''} de histórias do seu plano este mês.`,
+          );
         } else if (e.status === 422) {
           setGenerateError('Não foi possível gerar a história com essa orientação. Tente modificar o texto.');
         } else if (e.status === 403) {
@@ -219,8 +241,8 @@ export default function GenerateScreen() {
   if (loadingConfig) {
     return (
       <AppShell title="Gerar história">
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color="#7C3AED" />
+        <View style={[styles.center, { backgroundColor: appTheme.bg }]}>
+          <ActivityIndicator size="large" color={appTheme.primary} />
         </View>
       </AppShell>
     );
@@ -229,9 +251,14 @@ export default function GenerateScreen() {
   if (configError) {
     return (
       <AppShell title="Gerar história">
-        <View style={styles.center}>
+        <View style={[styles.center, { backgroundColor: appTheme.bg }]}>
           <Text style={styles.errorText}>{configError}</Text>
-          <TouchableOpacity style={styles.primaryButton} onPress={() => void loadConfig()}>
+          <TouchableOpacity
+            style={[styles.primaryButton, { backgroundColor: appTheme.primary }]}
+            onPress={() => void loadConfig()}
+            accessibilityRole="button"
+            accessibilityLabel="Tentar novamente"
+          >
             <Text style={styles.primaryButtonText}>Tentar novamente</Text>
           </TouchableOpacity>
         </View>
@@ -242,12 +269,12 @@ export default function GenerateScreen() {
   if (!universeId && myUniverses.length === 0) {
     return (
       <AppShell title="Gerar história">
-        <View style={styles.center}>
+        <View style={[styles.center, { backgroundColor: appTheme.bg }]}>
           <Text style={styles.errorText}>
             Você ainda não tem universos. Crie um na tela inicial para gerar histórias.
           </Text>
           <TouchableOpacity
-            style={styles.primaryButton}
+            style={[styles.primaryButton, { backgroundColor: appTheme.primary }]}
             onPress={() => router.push('/')}
             accessibilityRole="button"
             accessibilityLabel="Ir para a tela inicial"
@@ -263,18 +290,18 @@ export default function GenerateScreen() {
   if (result) {
     return (
       <AppShell title="Gerar história">
-        <View style={styles.center}>
+        <View style={[styles.center, { backgroundColor: appTheme.bg }]}>
           <Text style={styles.successTitle}>História criada! 🎉</Text>
           <Text style={styles.successStoryTitle}>{result.title}</Text>
-          <View style={styles.weatherChip}>
-            <Text style={styles.weatherChipText}>
+          <View style={[styles.weatherChip, { backgroundColor: appTheme.primarySoft }]}>
+            <Text style={[styles.weatherChipText, { color: appTheme.primary }]}>
               🌤 {result.metadata_weather.condition}, {Math.round(result.metadata_weather.temp)}°C
               {' · '}
               {result.metadata_weather.time}
             </Text>
           </View>
           <TouchableOpacity
-            style={styles.primaryButton}
+            style={[styles.primaryButton, { backgroundColor: appTheme.primary }]}
             onPress={() => router.push(`/story/${result.id}`)}
             accessible
             accessibilityRole="button"
@@ -288,7 +315,9 @@ export default function GenerateScreen() {
             accessibilityRole="button"
             accessibilityLabel="Gerar outra história"
           >
-            <Text style={styles.secondaryButtonText}>Gerar outra</Text>
+            <Text style={[styles.secondaryButtonText, { color: appTheme.primary }]}>
+              Gerar outra
+            </Text>
           </TouchableOpacity>
         </View>
       </AppShell>
@@ -298,11 +327,11 @@ export default function GenerateScreen() {
   return (
     <AppShell title="Gerar história">
       <ScrollView
-        style={styles.scroll}
+        style={[styles.scroll, { backgroundColor: appTheme.bg }]}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.pageTitle}>Gerar história</Text>
+        <Text style={styles.pageTitle} accessibilityRole="header">Gerar história</Text>
         <Text style={styles.pageSubtitle}>Personalize a próxima aventura</Text>
 
         {!universeParam && myUniverses.length > 0 && (
@@ -312,12 +341,12 @@ export default function GenerateScreen() {
               {myUniverses.map((u) => (
                 <TouchableOpacity
                   key={u.id}
-                  style={[styles.themeChip, universeId === u.id && styles.themeChipActive]}
+                  style={chipStyle(universeId === u.id)}
                   onPress={() => setUniverseId(u.id)}
                   accessibilityRole="button"
                   accessibilityLabel={`Universo ${u.title}`}
                 >
-                  <Text style={[styles.themeChipText, universeId === u.id && styles.themeChipTextActive]}>
+                  <Text style={chipTextStyle(universeId === u.id)}>
                     {u.title}
                   </Text>
                 </TouchableOpacity>
@@ -329,7 +358,7 @@ export default function GenerateScreen() {
         <View style={styles.formGroup}>
           <Text style={styles.label}>Sobre o que vai ser a história de hoje?</Text>
           <TextInput
-            style={styles.textArea}
+            style={[styles.textArea, { borderColor: appTheme.primarySoft }]}
             placeholder="ex.: aprender a dividir os brinquedos, vencer o medo do escuro..."
             placeholderTextColor="#9CA3AF"
             multiline
@@ -350,24 +379,24 @@ export default function GenerateScreen() {
             <Text style={styles.label}>Tema (opcional)</Text>
             <View style={styles.themeList}>
               <TouchableOpacity
-                style={[styles.themeChip, selectedThemeId === null && styles.themeChipActive]}
+                style={chipStyle(selectedThemeId === null)}
                 onPress={() => setSelectedThemeId(null)}
                 accessibilityRole="button"
                 accessibilityLabel="Nenhum tema"
               >
-                <Text style={[styles.themeChipText, selectedThemeId === null && styles.themeChipTextActive]}>
+                <Text style={chipTextStyle(selectedThemeId === null)}>
                   Nenhum
                 </Text>
               </TouchableOpacity>
               {themes.map((theme) => (
                 <TouchableOpacity
                   key={theme.id}
-                  style={[styles.themeChip, selectedThemeId === theme.id && styles.themeChipActive]}
+                  style={chipStyle(selectedThemeId === theme.id)}
                   onPress={() => setSelectedThemeId(theme.id)}
                   accessibilityRole="button"
                   accessibilityLabel={`Tema ${theme.title}`}
                 >
-                  <Text style={[styles.themeChipText, selectedThemeId === theme.id && styles.themeChipTextActive]}>
+                  <Text style={chipTextStyle(selectedThemeId === theme.id)}>
                     {theme.title}
                   </Text>
                 </TouchableOpacity>
@@ -381,36 +410,38 @@ export default function GenerateScreen() {
             <Text style={styles.label}>Continuar arco (opcional)</Text>
             <View style={styles.themeList}>
               <TouchableOpacity
-                style={[styles.themeChip, selectedArcId === null && styles.themeChipActive]}
+                style={chipStyle(selectedArcId === null)}
                 onPress={() => setSelectedArcId(null)}
                 accessibilityRole="button"
                 accessibilityLabel="Nenhum arco"
               >
-                <Text style={[styles.themeChipText, selectedArcId === null && styles.themeChipTextActive]}>
+                <Text style={chipTextStyle(selectedArcId === null)}>
                   Nenhum
                 </Text>
               </TouchableOpacity>
               {arcs.map((arc) => (
                 <TouchableOpacity
                   key={arc.id}
-                  style={[styles.themeChip, selectedArcId === arc.id && styles.themeChipActive]}
+                  style={chipStyle(selectedArcId === arc.id)}
                   onPress={() => setSelectedArcId(arc.id)}
                   accessibilityRole="button"
                   accessibilityLabel={`Arco ${arc.title}`}
                 >
-                  <Text style={[styles.themeChipText, selectedArcId === arc.id && styles.themeChipTextActive]}>
+                  <Text style={chipTextStyle(selectedArcId === arc.id)}>
                     {arc.title}
                   </Text>
                 </TouchableOpacity>
               ))}
               {!showArcForm && (
                 <TouchableOpacity
-                  style={styles.newArcChip}
+                  style={[styles.newArcChip, { borderColor: appTheme.primary }]}
                   onPress={() => setShowArcForm(true)}
                   accessibilityRole="button"
                   accessibilityLabel="Criar novo arco"
                 >
-                  <Text style={styles.newArcChipText}>+ Novo arco</Text>
+                  <Text style={[styles.newArcChipText, { color: appTheme.primary }]}>
+                    + Novo arco
+                  </Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -418,7 +449,7 @@ export default function GenerateScreen() {
             {showArcForm && (
               <View style={styles.arcForm}>
                 <TextInput
-                  style={styles.arcInput}
+                  style={[styles.arcInput, { borderColor: appTheme.primarySoft }]}
                   placeholder="Título do novo arco"
                   placeholderTextColor="#9CA3AF"
                   value={newArcTitle}
@@ -428,7 +459,11 @@ export default function GenerateScreen() {
                   {...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : {})}
                 />
                 <TouchableOpacity
-                  style={[styles.arcCreateBtn, creatingArc && styles.primaryButtonDisabled]}
+                  style={[
+                    styles.arcCreateBtn,
+                    { backgroundColor: appTheme.primary },
+                    creatingArc && styles.primaryButtonDisabled,
+                  ]}
                   onPress={() => void handleCreateArc()}
                   disabled={creatingArc}
                   accessibilityRole="button"
@@ -463,24 +498,24 @@ export default function GenerateScreen() {
             <Text style={styles.label}>Para quem é a história? (opcional)</Text>
             <View style={styles.themeList}>
               <TouchableOpacity
-                style={[styles.themeChip, selectedProfileId === null && styles.themeChipActive]}
+                style={chipStyle(selectedProfileId === null)}
                 onPress={() => setSelectedProfileId(null)}
                 accessibilityRole="button"
                 accessibilityLabel="Nenhum perfil"
               >
-                <Text style={[styles.themeChipText, selectedProfileId === null && styles.themeChipTextActive]}>
+                <Text style={chipTextStyle(selectedProfileId === null)}>
                   Ninguém específico
                 </Text>
               </TouchableOpacity>
               {profiles.map((profile) => (
                 <TouchableOpacity
                   key={profile.id}
-                  style={[styles.themeChip, selectedProfileId === profile.id && styles.themeChipActive]}
+                  style={chipStyle(selectedProfileId === profile.id)}
                   onPress={() => setSelectedProfileId(profile.id)}
                   accessibilityRole="button"
                   accessibilityLabel={`Perfil ${profile.nickname}`}
                 >
-                  <Text style={[styles.themeChipText, selectedProfileId === profile.id && styles.themeChipTextActive]}>
+                  <Text style={chipTextStyle(selectedProfileId === profile.id)}>
                     {profile.nickname}
                   </Text>
                 </TouchableOpacity>
@@ -495,8 +530,8 @@ export default function GenerateScreen() {
             <Switch
               value={useGeo}
               onValueChange={(v) => void handleToggleGeo(v)}
-              trackColor={{ false: '#DDD6FE', true: '#A78BFA' }}
-              thumbColor={useGeo ? '#7C3AED' : '#ffffff'}
+              trackColor={{ false: appTheme.primarySoft, true: appTheme.primarySoft }}
+              thumbColor={useGeo ? appTheme.primary : '#ffffff'}
               accessibilityLabel="Usar minha localização para o clima"
             />
           </View>
@@ -513,14 +548,20 @@ export default function GenerateScreen() {
         ) : null}
 
         {generating ? (
-          <View style={styles.generatingBox}>
-            <ActivityIndicator size="small" color="#7C3AED" />
-            <Text style={styles.generatingText}>Criando a história… isso leva alguns segundos</Text>
+          <View style={[styles.generatingBox, { backgroundColor: appTheme.primarySoft }]}>
+            <ActivityIndicator size="small" color={appTheme.primary} />
+            <Text style={[styles.generatingText, { color: appTheme.primary }]}>
+              Criando a história… isso leva alguns segundos
+            </Text>
           </View>
         ) : null}
 
         <TouchableOpacity
-          style={[styles.primaryButton, (generating || !universeId) && styles.primaryButtonDisabled]}
+          style={[
+            styles.primaryButton,
+            { backgroundColor: appTheme.primary },
+            (generating || !universeId) && styles.primaryButtonDisabled,
+          ]}
           onPress={() => void handleGenerate()}
           disabled={generating || !universeId}
           accessible
@@ -542,7 +583,6 @@ export default function GenerateScreen() {
 const styles = StyleSheet.create({
   scroll: {
     flex: 1,
-    backgroundColor: '#FAF5FF',
   },
   scrollContent: {
     padding: 24,
@@ -552,7 +592,6 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FAF5FF',
     padding: 24,
   },
   pageTitle: {
@@ -578,7 +617,6 @@ const styles = StyleSheet.create({
   textArea: {
     backgroundColor: '#ffffff',
     borderWidth: 1.5,
-    borderColor: '#DDD6FE',
     borderRadius: 12,
     padding: 14,
     fontSize: 15,
@@ -602,33 +640,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderRadius: 20,
     borderWidth: 1.5,
-    borderColor: '#DDD6FE',
     backgroundColor: '#ffffff',
-  },
-  themeChipActive: {
-    backgroundColor: '#7C3AED',
-    borderColor: '#7C3AED',
   },
   themeChipText: {
     fontSize: 14,
-    color: '#7C3AED',
     fontWeight: '600',
-  },
-  themeChipTextActive: {
-    color: '#ffffff',
   },
   newArcChip: {
     paddingVertical: 8,
     paddingHorizontal: 14,
     borderRadius: 20,
     borderWidth: 1.5,
-    borderColor: '#7C3AED',
     borderStyle: 'dashed',
     backgroundColor: '#ffffff',
   },
   newArcChipText: {
     fontSize: 14,
-    color: '#7C3AED',
     fontWeight: '700',
   },
   arcForm: {
@@ -641,7 +668,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#ffffff',
     borderWidth: 1.5,
-    borderColor: '#DDD6FE',
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 9,
@@ -649,7 +675,6 @@ const styles = StyleSheet.create({
     color: '#1E1B4B',
   },
   arcCreateBtn: {
-    backgroundColor: '#7C3AED',
     borderRadius: 10,
     paddingVertical: 10,
     paddingHorizontal: 16,
@@ -700,19 +725,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: '#EDE9FE',
     borderRadius: 10,
     padding: 14,
     marginBottom: 16,
   },
   generatingText: {
     fontSize: 14,
-    color: '#7C3AED',
     fontWeight: '600',
     flex: 1,
   },
   primaryButton: {
-    backgroundColor: '#7C3AED',
     borderRadius: 14,
     paddingVertical: 16,
     paddingHorizontal: 32,
@@ -720,7 +742,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   primaryButtonDisabled: {
-    backgroundColor: '#A78BFA',
+    opacity: 0.6,
   },
   primaryButtonText: {
     color: '#ffffff',
@@ -733,7 +755,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   secondaryButtonText: {
-    color: '#7C3AED',
     fontWeight: '700',
     fontSize: 15,
   },
@@ -752,7 +773,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   weatherChip: {
-    backgroundColor: '#EDE9FE',
     borderRadius: 20,
     paddingVertical: 8,
     paddingHorizontal: 16,
@@ -760,7 +780,6 @@ const styles = StyleSheet.create({
   },
   weatherChipText: {
     fontSize: 14,
-    color: '#7C3AED',
     fontWeight: '600',
   },
 });

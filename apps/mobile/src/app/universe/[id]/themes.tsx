@@ -11,48 +11,27 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useAuth } from '../auth/AuthContext';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useAuth } from '../../../auth/AuthContext';
 import {
-  listChildProfiles,
-  createChildProfile,
-  updateChildProfile,
-  deleteChildProfile,
-  type ChildProfile,
-} from '../lib/api';
-import { useAppTheme } from '../theme/AppThemeContext';
-import AppShell from '../components/AppShell';
-
-type AgeBand = '0_3' | '4_6' | '7_9' | '10_12';
-
-const AGE_BANDS: { value: AgeBand; label: string }[] = [
-  { value: '0_3', label: '0–3 anos' },
-  { value: '4_6', label: '4–6 anos' },
-  { value: '7_9', label: '7–9 anos' },
-  { value: '10_12', label: '10–12 anos' },
-];
-
-function ageBandLabel(value: string): string {
-  return AGE_BANDS.find((b) => b.value === value)?.label ?? value;
-}
+  getUniverse,
+  listThemes,
+  createTheme,
+  updateTheme,
+  deleteTheme,
+} from '../../../lib/api';
+import { useAppTheme } from '../../../theme/AppThemeContext';
+import type { Theme, CreateThemeInput, UpdateThemeInput } from '@storygen/shared';
+import AppShell from '../../../components/AppShell';
 
 type FormState = {
-  nickname: string;
-  ageBand: AgeBand;
-  preferences: string;
+  title: string;
+  description: string;
 };
 
-const emptyForm: FormState = {
-  nickname: '',
-  ageBand: '4_6',
-  preferences: '',
-};
+const emptyForm: FormState = { title: '', description: '' };
 
-function profilePreferencesText(profile: ChildProfile): string {
-  const notes = profile.preferences?.notas;
-  return typeof notes === 'string' ? notes : '';
-}
-
-function ProfileForm({
+function ThemeForm({
   initial,
   onSave,
   onCancel,
@@ -73,64 +52,37 @@ function ProfileForm({
   return (
     <View style={formStyles.container}>
       <View style={formStyles.field}>
-        <Text style={formStyles.label}>Apelido *</Text>
+        <Text style={formStyles.label}>Título *</Text>
         <TextInput
           style={[
             formStyles.input,
             { backgroundColor: theme.bg, borderColor: theme.primarySoft },
           ]}
-          value={form.nickname}
-          onChangeText={(v) => set('nickname', v)}
-          placeholder="Como a criança gosta de ser chamada"
+          value={form.title}
+          onChangeText={(v) => set('title', v)}
+          placeholder="Título do tema"
           placeholderTextColor="#9CA3AF"
-          accessibilityLabel="Apelido da criança"
+          accessibilityLabel="Título do tema"
           {...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : {})}
         />
       </View>
 
       <View style={formStyles.field}>
-        <Text style={formStyles.label}>Faixa etária *</Text>
-        <View style={formStyles.chipRow}>
-          {AGE_BANDS.map((band) => (
-            <TouchableOpacity
-              key={band.value}
-              style={[
-                formStyles.chip,
-                { borderColor: theme.primarySoft },
-                form.ageBand === band.value && {
-                  backgroundColor: theme.primary,
-                  borderColor: theme.primary,
-                },
-              ]}
-              onPress={() => set('ageBand', band.value)}
-              accessibilityRole="button"
-              accessibilityLabel={`Faixa etária ${band.label}`}
-            >
-              <Text
-                style={[
-                  formStyles.chipText,
-                  { color: form.ageBand === band.value ? '#ffffff' : theme.primary },
-                ]}
-              >
-                {band.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
-
-      <View style={formStyles.field}>
-        <Text style={formStyles.label}>Preferências (opcional)</Text>
+        <Text style={formStyles.label}>Descrição (opcional)</Text>
         <TextInput
           style={[
             formStyles.input,
+            formStyles.textArea,
             { backgroundColor: theme.bg, borderColor: theme.primarySoft },
           ]}
-          value={form.preferences}
-          onChangeText={(v) => set('preferences', v)}
-          placeholder="ex.: dinossauros, futebol, princesas..."
+          value={form.description}
+          onChangeText={(v) => set('description', v)}
+          placeholder="Descreva o tema..."
           placeholderTextColor="#9CA3AF"
-          accessibilityLabel="Preferências da criança"
+          multiline
+          numberOfLines={4}
+          textAlignVertical="top"
+          accessibilityLabel="Descrição do tema"
           {...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : {})}
         />
       </View>
@@ -154,7 +106,7 @@ function ProfileForm({
           onPress={() => onSave(form)}
           disabled={saving}
           accessibilityRole="button"
-          accessibilityLabel="Salvar perfil"
+          accessibilityLabel="Salvar tema"
         >
           {saving ? (
             <ActivityIndicator size="small" color="#ffffff" />
@@ -167,29 +119,44 @@ function ProfileForm({
   );
 }
 
-export default function ChildProfilesScreen() {
-  const { accessToken } = useAuth();
+/**
+ * Temas de um universo (RF-12) — dono OU admin/mod (o servidor também
+ * valida). Mesma UI de CRUD do back-office, parametrizada pelo universo da rota.
+ */
+export default function UniverseThemesScreen() {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const router = useRouter() as any;
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const { accessToken, userId, role } = useAuth();
   const theme = useAppTheme();
 
-  const [profiles, setProfiles] = useState<ChildProfile[]>([]);
+  const [allowed, setAllowed] = useState<boolean | null>(null);
+  const [themes, setThemes] = useState<Theme[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [showForm, setShowForm] = useState(false);
-  const [editingProfile, setEditingProfile] = useState<ChildProfile | null>(null);
+  const [editingTheme, setEditingTheme] = useState<Theme | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  const isPrivileged = role === 'ADMIN' || role === 'MODERATOR';
+
   const load = useCallback(async () => {
-    if (!accessToken) return;
+    if (!accessToken || !id) return;
     try {
       setError(null);
-      const list = await listChildProfiles(accessToken);
-      setProfiles(list);
+      const universe = await getUniverse(id, accessToken);
+      const canManage = universe.userId === userId || isPrivileged;
+      setAllowed(canManage);
+      if (canManage) {
+        const list = await listThemes(id, accessToken);
+        setThemes(list);
+      }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Erro ao carregar perfis.');
+      setError(e instanceof Error ? e.message : 'Erro ao carregar temas.');
     }
-  }, [accessToken]);
+  }, [accessToken, id, userId, isPrivileged]);
 
   useEffect(() => {
     setLoading(true);
@@ -197,83 +164,72 @@ export default function ChildProfilesScreen() {
   }, [load]);
 
   async function handleSave(form: FormState) {
-    if (!accessToken) return;
-    if (!form.nickname.trim()) {
-      setFormError('O apelido é obrigatório.');
+    if (!id || !accessToken) return;
+    if (!form.title.trim()) {
+      setFormError('O título é obrigatório.');
       return;
     }
     setSaving(true);
     setFormError(null);
     try {
-      const preferences = form.preferences.trim()
-        ? { notas: form.preferences.trim() }
-        : {};
-
-      if (editingProfile) {
-        await updateChildProfile(
-          editingProfile.id,
-          {
-            nickname: form.nickname.trim(),
-            age_band: form.ageBand,
-            preferences,
-          },
-          accessToken,
-        );
+      if (editingTheme) {
+        const input: UpdateThemeInput = {
+          title: form.title.trim(),
+          description: form.description.trim() || undefined,
+        };
+        await updateTheme(id, editingTheme.id, input, accessToken);
       } else {
-        await createChildProfile(
-          {
-            nickname: form.nickname.trim(),
-            age_band: form.ageBand,
-            ...(form.preferences.trim() ? { preferences } : {}),
-          },
-          accessToken,
-        );
+        const input: CreateThemeInput = {
+          title: form.title.trim(),
+          description: form.description.trim() || undefined,
+        };
+        await createTheme(id, input, accessToken);
       }
       setShowForm(false);
-      setEditingProfile(null);
+      setEditingTheme(null);
       await load();
     } catch (e: unknown) {
-      setFormError(e instanceof Error ? e.message : 'Erro ao salvar perfil.');
+      setFormError(e instanceof Error ? e.message : 'Erro ao salvar tema.');
     } finally {
       setSaving(false);
     }
   }
 
-  function handleEdit(profile: ChildProfile) {
-    setEditingProfile(profile);
+  function handleEdit(t: Theme) {
+    setEditingTheme(t);
     setFormError(null);
     setShowForm(true);
   }
 
   function handleNew() {
-    setEditingProfile(null);
+    setEditingTheme(null);
     setFormError(null);
     setShowForm(true);
   }
 
-  async function handleDelete(profile: ChildProfile) {
-    if (!accessToken) return;
+  async function handleDelete(t: Theme) {
+    if (!id || !accessToken) return;
     const confirmed =
       Platform.OS === 'web'
-        ? window.confirm(`Excluir o perfil "${profile.nickname}"?`)
+        ? window.confirm(`Excluir o tema "${t.title}"?`)
         : await new Promise<boolean>((resolve) => {
-            Alert.alert('Excluir perfil', `Excluir o perfil "${profile.nickname}"?`, [
+            Alert.alert('Excluir tema', `Excluir "${t.title}"?`, [
               { text: 'Cancelar', onPress: () => resolve(false) },
               { text: 'Excluir', style: 'destructive', onPress: () => resolve(true) },
             ]);
           });
     if (!confirmed) return;
     try {
-      await deleteChildProfile(profile.id, accessToken);
+      await deleteTheme(id, t.id, accessToken);
       await load();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Erro ao excluir perfil.');
+      setError(e instanceof Error ? e.message : 'Erro ao excluir tema.');
     }
   }
 
-  if (loading) {
+  if (loading || (allowed === null && !error)) {
     return (
-      <AppShell title="Perfis infantis">
+      <AppShell title="Temas">
         <View style={[styles.center, { backgroundColor: theme.bg }]}>
           <ActivityIndicator size="large" color={theme.primary} />
         </View>
@@ -283,7 +239,7 @@ export default function ChildProfilesScreen() {
 
   if (error) {
     return (
-      <AppShell title="Perfis infantis">
+      <AppShell title="Temas">
         <View style={[styles.center, { backgroundColor: theme.bg }]}>
           <Text style={styles.errorText}>{error}</Text>
           <TouchableOpacity
@@ -299,79 +255,90 @@ export default function ChildProfilesScreen() {
     );
   }
 
-  const formInitial: FormState = editingProfile
+  if (allowed === false) {
+    return (
+      <AppShell title="Temas">
+        <View style={[styles.center, { backgroundColor: theme.bg }]}>
+          <Text style={styles.restrictedIcon}>🔒</Text>
+          <Text style={styles.restrictedTitle}>Acesso restrito</Text>
+          <Text style={styles.restrictedText}>
+            Apenas o dono do universo (ou a moderação) pode gerenciar temas.
+          </Text>
+        </View>
+      </AppShell>
+    );
+  }
+
+  const formInitial: FormState = editingTheme
     ? {
-        nickname: editingProfile.nickname,
-        ageBand: editingProfile.ageBand,
-        preferences: profilePreferencesText(editingProfile),
+        title: editingTheme.title,
+        description: editingTheme.description ?? '',
       }
     : emptyForm;
 
   return (
-    <AppShell title="Perfis infantis">
+    <AppShell title="Temas">
       <ScrollView
         style={[styles.scroll, { backgroundColor: theme.bg }]}
         contentContainerStyle={styles.scrollContent}
       >
+        <TouchableOpacity
+          style={styles.backRow}
+          onPress={() => router.back()}
+          accessibilityRole="button"
+          accessibilityLabel="Voltar para o universo"
+        >
+          <Text style={[styles.backLink, { color: theme.primary }]}>← Voltar</Text>
+        </TouchableOpacity>
+
         <View style={styles.header}>
-          <Text style={styles.pageTitle}>Perfis infantis</Text>
+          <Text style={styles.pageTitle} accessibilityRole="header">Temas</Text>
           {!showForm && (
             <TouchableOpacity
               style={[styles.addButton, { backgroundColor: theme.primary }]}
               onPress={handleNew}
               accessibilityRole="button"
-              accessibilityLabel="Novo perfil infantil"
+              accessibilityLabel="Novo tema"
             >
               <Text style={styles.addButtonText}>+ Novo</Text>
             </TouchableOpacity>
           )}
         </View>
 
-        <Text style={styles.pageSubtitle}>
-          Cadastre as crianças para personalizar as histórias por faixa etária.
-        </Text>
-
         {showForm && (
           <View style={styles.formPanel}>
             <Text style={styles.formPanelTitle}>
-              {editingProfile ? 'Editar perfil' : 'Novo perfil'}
+              {editingTheme ? 'Editar tema' : 'Novo tema'}
             </Text>
             {formError ? <Text style={styles.formError}>{formError}</Text> : null}
-            <ProfileForm
+            <ThemeForm
               initial={formInitial}
               onSave={(f) => void handleSave(f)}
               onCancel={() => {
                 setShowForm(false);
-                setEditingProfile(null);
+                setEditingTheme(null);
               }}
               saving={saving}
             />
           </View>
         )}
 
-        {profiles.length === 0 ? (
+        {themes.length === 0 ? (
           <View style={styles.empty}>
-            <Text style={styles.emptyText}>Nenhum perfil cadastrado ainda.</Text>
+            <Text style={styles.emptyText}>Nenhum tema cadastrado.</Text>
           </View>
         ) : (
           <FlatList
-            data={profiles}
+            data={themes}
             keyExtractor={(item) => item.id}
             scrollEnabled={false}
             contentContainerStyle={styles.list}
             renderItem={({ item }) => (
               <View style={styles.card}>
-                <View style={styles.cardHeader}>
-                  <Text style={styles.cardName}>{item.nickname}</Text>
-                  <View style={[styles.badge, { backgroundColor: theme.primarySoft }]}>
-                    <Text style={[styles.badgeText, { color: theme.primary }]}>
-                      {ageBandLabel(item.ageBand)}
-                    </Text>
-                  </View>
-                </View>
-                {profilePreferencesText(item) ? (
-                  <Text style={styles.cardMeta}>
-                    Preferências: {profilePreferencesText(item)}
+                <Text style={styles.cardName}>{item.title}</Text>
+                {item.description ? (
+                  <Text style={styles.cardMeta} numberOfLines={3}>
+                    {item.description}
                   </Text>
                 ) : null}
                 <View style={styles.cardActions}>
@@ -379,7 +346,7 @@ export default function ChildProfilesScreen() {
                     style={[styles.editButton, { backgroundColor: theme.primarySoft }]}
                     onPress={() => handleEdit(item)}
                     accessibilityRole="button"
-                    accessibilityLabel={`Editar perfil ${item.nickname}`}
+                    accessibilityLabel={`Editar tema ${item.title}`}
                   >
                     <Text style={[styles.editButtonText, { color: theme.primary }]}>
                       Editar
@@ -389,7 +356,7 @@ export default function ChildProfilesScreen() {
                     style={styles.deleteButton}
                     onPress={() => void handleDelete(item)}
                     accessibilityRole="button"
-                    accessibilityLabel={`Excluir perfil ${item.nickname}`}
+                    accessibilityLabel={`Excluir tema ${item.title}`}
                   >
                     <Text style={styles.deleteButtonText}>Excluir</Text>
                   </TouchableOpacity>
@@ -423,21 +390,8 @@ const formStyles = StyleSheet.create({
     fontSize: 15,
     color: '#1E1B4B',
   },
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
-  chip: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 16,
-    borderWidth: 1.5,
-    backgroundColor: '#ffffff',
-  },
-  chipText: {
-    fontSize: 13,
-    fontWeight: '600',
+  textArea: {
+    minHeight: 90,
   },
   actions: {
     flexDirection: 'row',
@@ -486,21 +440,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 24,
   },
+  backRow: {
+    marginBottom: 12,
+  },
+  backLink: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 6,
+    marginBottom: 20,
   },
   pageTitle: {
     fontSize: 26,
     fontWeight: '800',
     color: '#1E1B4B',
-  },
-  pageSubtitle: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginBottom: 20,
   },
   addButton: {
     borderRadius: 10,
@@ -547,27 +503,11 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 2,
   },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-  },
   cardName: {
     fontSize: 17,
     fontWeight: '700',
     color: '#1E1B4B',
-    flex: 1,
-  },
-  badge: {
-    borderRadius: 8,
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    marginLeft: 8,
-  },
-  badgeText: {
-    fontSize: 12,
-    fontWeight: '700',
+    marginBottom: 6,
   },
   cardMeta: {
     fontSize: 13,
@@ -624,5 +564,21 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontWeight: '700',
     fontSize: 15,
+  },
+  restrictedIcon: {
+    fontSize: 48,
+    marginBottom: 12,
+  },
+  restrictedTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#1E1B4B',
+    marginBottom: 8,
+  },
+  restrictedText: {
+    fontSize: 15,
+    color: '#6B7280',
+    textAlign: 'center',
+    maxWidth: 300,
   },
 });

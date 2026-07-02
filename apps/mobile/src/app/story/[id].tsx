@@ -12,7 +12,8 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useAuth } from '../../auth/AuthContext';
-import { getStory, createReport } from '../../lib/api';
+import { getStory, createReport, updateStoryVisibility, ApiError } from '../../lib/api';
+import { useAppTheme } from '../../theme/AppThemeContext';
 import type { Story } from '@storygen/shared';
 
 const REPORT_REASONS = [
@@ -22,6 +23,14 @@ const REPORT_REASONS = [
 ] as const;
 
 const MAX_REPORT_DETAILS = 1000;
+
+type Visibility = 'PRIVATE' | 'PUBLIC' | 'PAID';
+
+const VISIBILITY_OPTIONS: { value: Visibility; label: string }[] = [
+  { value: 'PRIVATE', label: 'Privada' },
+  { value: 'PUBLIC', label: 'Pública' },
+  { value: 'PAID', label: 'Paga' },
+];
 
 function ReportModal({
   visible,
@@ -34,6 +43,7 @@ function ReportModal({
   accessToken: string;
   onClose: () => void;
 }) {
+  const theme = useAppTheme();
   const [reason, setReason] = useState<string | null>(null);
   const [details, setDetails] = useState('');
   const [sending, setSending] = useState(false);
@@ -102,12 +112,24 @@ function ReportModal({
                 {REPORT_REASONS.map((r) => (
                   <TouchableOpacity
                     key={r}
-                    style={[modalStyles.chip, reason === r && modalStyles.chipActive]}
+                    style={[
+                      modalStyles.chip,
+                      { borderColor: theme.primarySoft },
+                      reason === r && {
+                        backgroundColor: theme.primary,
+                        borderColor: theme.primary,
+                      },
+                    ]}
                     onPress={() => setReason(r)}
                     accessibilityRole="button"
                     accessibilityLabel={`Motivo: ${r}`}
                   >
-                    <Text style={[modalStyles.chipText, reason === r && modalStyles.chipTextActive]}>
+                    <Text
+                      style={[
+                        modalStyles.chipText,
+                        { color: reason === r ? '#ffffff' : theme.primary },
+                      ]}
+                    >
                       {r}
                     </Text>
                   </TouchableOpacity>
@@ -116,7 +138,10 @@ function ReportModal({
 
               <Text style={modalStyles.label}>Detalhes (opcional)</Text>
               <TextInput
-                style={modalStyles.textArea}
+                style={[
+                  modalStyles.textArea,
+                  { backgroundColor: theme.bg, borderColor: theme.primarySoft },
+                ]}
                 placeholder="Conte o que aconteceu..."
                 placeholderTextColor="#9CA3AF"
                 multiline
@@ -133,7 +158,7 @@ function ReportModal({
 
               <View style={modalStyles.actions}>
                 <TouchableOpacity
-                  style={modalStyles.cancelButton}
+                  style={[modalStyles.cancelButton, { borderColor: theme.primarySoft }]}
                   onPress={handleClose}
                   disabled={sending}
                   accessibilityRole="button"
@@ -166,11 +191,98 @@ function ReportModal({
   );
 }
 
+/**
+ * Controle de visibilidade — só o GERADOR da história vê (SDD §6.4).
+ * PUBLIC exige moderação APPROVED → 422 CONTENT_NOT_APPROVED.
+ */
+function VisibilityControl({
+  story,
+  accessToken,
+  onChanged,
+}: {
+  story: Story;
+  accessToken: string;
+  onChanged: (visibility: Visibility) => void;
+}) {
+  const theme = useAppTheme();
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [isError, setIsError] = useState(false);
+
+  async function handleSelect(visibility: Visibility) {
+    if (busy || visibility === story.visibility) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const res = await updateStoryVisibility(story.id, visibility, accessToken);
+      onChanged(res.visibility);
+      setIsError(false);
+      setMessage('Visibilidade atualizada.');
+    } catch (e: unknown) {
+      setIsError(true);
+      if (e instanceof ApiError && e.code === 'CONTENT_NOT_APPROVED') {
+        setMessage('História ainda não aprovada pela moderação.');
+      } else if (e instanceof ApiError) {
+        setMessage(e.message);
+      } else {
+        setMessage('Erro ao atualizar a visibilidade. Tente novamente.');
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <View style={styles.visibilityBox}>
+      <Text style={styles.visibilityLabel}>Visibilidade da história</Text>
+      <View style={styles.visibilityRow}>
+        {VISIBILITY_OPTIONS.map((opt) => {
+          const active = story.visibility === opt.value;
+          return (
+            <TouchableOpacity
+              key={opt.value}
+              style={[
+                styles.visibilityChip,
+                { borderColor: theme.primarySoft },
+                active && {
+                  backgroundColor: theme.primary,
+                  borderColor: theme.primary,
+                },
+              ]}
+              onPress={() => void handleSelect(opt.value)}
+              disabled={busy}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active, disabled: busy }}
+              accessibilityLabel={`Tornar história ${opt.label.toLowerCase()}`}
+            >
+              <Text
+                style={[
+                  styles.visibilityChipText,
+                  { color: active ? '#ffffff' : theme.primary },
+                ]}
+              >
+                {opt.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+        {busy ? <ActivityIndicator size="small" color={theme.primary} /> : null}
+      </View>
+      {message ? (
+        <Text style={[styles.visibilityMessage, isError && styles.visibilityMessageError]}>
+          {message}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 export default function StoryScreen() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const router = useRouter() as any;
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { accessToken } = useAuth();
+  const { accessToken, userId } = useAuth();
+  const theme = useAppTheme();
 
   const [story, setStory] = useState<Story | null>(null);
   const [loading, setLoading] = useState(true);
@@ -190,17 +302,22 @@ export default function StoryScreen() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#7C3AED" />
+      <View style={[styles.center, { backgroundColor: theme.bg }]}>
+        <ActivityIndicator size="large" color={theme.primary} />
       </View>
     );
   }
 
   if (error || !story) {
     return (
-      <View style={styles.center}>
+      <View style={[styles.center, { backgroundColor: theme.bg }]}>
         <Text style={styles.errorText}>{error ?? 'História não encontrada.'}</Text>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+        <TouchableOpacity
+          style={[styles.backButton, { backgroundColor: theme.primary }]}
+          onPress={() => router.back()}
+          accessibilityRole="button"
+          accessibilityLabel="Voltar"
+        >
           <Text style={styles.backButtonText}>Voltar</Text>
         </TouchableOpacity>
       </View>
@@ -213,9 +330,12 @@ export default function StoryScreen() {
     .map((p) => p.trim())
     .filter((p) => p.length > 0);
 
+  const weather = story.metadata_weather ?? null;
+  const isGenerator = Boolean(userId && story.user_id && userId === story.user_id);
+
   return (
     <ScrollView
-      style={styles.scroll}
+      style={[styles.scroll, { backgroundColor: theme.bg }]}
       contentContainerStyle={styles.content}
       accessible
       accessibilityLabel={`História: ${story.title}`}
@@ -227,7 +347,7 @@ export default function StoryScreen() {
           accessibilityRole="button"
           accessibilityLabel="Voltar para a lista"
         >
-          <Text style={styles.backLink}>← Voltar</Text>
+          <Text style={[styles.backLink, { color: theme.primary }]}>← Voltar</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -243,6 +363,28 @@ export default function StoryScreen() {
       <Text style={styles.title} accessibilityRole="header">
         {story.title}
       </Text>
+
+      {weather ? (
+        <View
+          style={[styles.weatherChip, { backgroundColor: theme.primarySoft }]}
+          accessible
+          accessibilityLabel={`Clima da história: ${weather.condition}, ${Math.round(weather.temp)} graus, ${weather.time}`}
+        >
+          <Text style={[styles.weatherChipText, { color: theme.primary }]}>
+            🌤 {weather.condition}, {Math.round(weather.temp)}°C{' · '}{weather.time}
+          </Text>
+        </View>
+      ) : null}
+
+      {isGenerator && accessToken ? (
+        <VisibilityControl
+          story={story}
+          accessToken={accessToken}
+          onChanged={(visibility) =>
+            setStory((s) => (s ? { ...s, visibility } : s))
+          }
+        />
+      ) : null}
 
       {paragraphs.map((paragraph, index) => (
         <Text
@@ -304,25 +446,14 @@ const modalStyles = StyleSheet.create({
     paddingHorizontal: 14,
     borderRadius: 20,
     borderWidth: 1.5,
-    borderColor: '#DDD6FE',
     backgroundColor: '#ffffff',
-  },
-  chipActive: {
-    backgroundColor: '#7C3AED',
-    borderColor: '#7C3AED',
   },
   chipText: {
     fontSize: 14,
-    color: '#7C3AED',
     fontWeight: '600',
   },
-  chipTextActive: {
-    color: '#ffffff',
-  },
   textArea: {
-    backgroundColor: '#FAF5FF',
     borderWidth: 1.5,
-    borderColor: '#DDD6FE',
     borderRadius: 10,
     padding: 12,
     fontSize: 14,
@@ -350,7 +481,6 @@ const modalStyles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 10,
     borderWidth: 1.5,
-    borderColor: '#DDD6FE',
     alignItems: 'center',
   },
   cancelButtonText: {
@@ -378,7 +508,6 @@ const modalStyles = StyleSheet.create({
 const styles = StyleSheet.create({
   scroll: {
     flex: 1,
-    backgroundColor: '#FAF5FF',
   },
   content: {
     paddingHorizontal: 24,
@@ -389,7 +518,6 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FAF5FF',
     padding: 24,
   },
   topRow: {
@@ -403,7 +531,6 @@ const styles = StyleSheet.create({
   },
   backLink: {
     fontSize: 16,
-    color: '#7C3AED',
     fontWeight: '600',
   },
   reportButton: {
@@ -422,7 +549,55 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#1E1B4B',
     lineHeight: 40,
-    marginBottom: 32,
+    marginBottom: 16,
+  },
+  weatherChip: {
+    alignSelf: 'flex-start',
+    borderRadius: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  weatherChipText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  visibilityBox: {
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 24,
+  },
+  visibilityLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#374151',
+    marginBottom: 8,
+  },
+  visibilityRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+  },
+  visibilityChip: {
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    backgroundColor: '#ffffff',
+  },
+  visibilityChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  visibilityMessage: {
+    fontSize: 13,
+    color: '#15803D',
+    marginTop: 8,
+  },
+  visibilityMessageError: {
+    color: '#DC2626',
   },
   paragraph: {
     fontSize: 20,
@@ -438,7 +613,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   backButton: {
-    backgroundColor: '#7C3AED',
     borderRadius: 8,
     paddingVertical: 10,
     paddingHorizontal: 24,

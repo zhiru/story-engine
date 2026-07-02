@@ -11,6 +11,7 @@ import {
 import { useRouter } from 'expo-router';
 import { useAuth } from '../auth/AuthContext';
 import { getDiscovery, rateUniverse, ApiError, type DiscoverySort } from '../lib/api';
+import { useAppTheme } from '../theme/AppThemeContext';
 import type { DiscoveryItem } from '@storygen/shared';
 import AppShell from '../components/AppShell';
 
@@ -50,6 +51,7 @@ export default function ExploreScreen() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const router = useRouter() as any;
   const { accessToken } = useAuth();
+  const theme = useAppTheme();
 
   const [sort, setSort] = useState<DiscoverySort>('recent');
   const [items, setItems] = useState<DiscoveryItem[]>([]);
@@ -127,8 +129,8 @@ export default function ExploreScreen() {
   if (loading) {
     return (
       <AppShell title="Descobrir">
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color="#7C3AED" />
+        <View style={[styles.center, { backgroundColor: theme.bg }]}>
+          <ActivityIndicator size="large" color={theme.primary} />
         </View>
       </AppShell>
     );
@@ -137,9 +139,14 @@ export default function ExploreScreen() {
   if (error) {
     return (
       <AppShell title="Descobrir">
-        <View style={styles.center}>
+        <View style={[styles.center, { backgroundColor: theme.bg }]}>
           <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.primaryButton} onPress={() => void loadFirstPage()}>
+          <TouchableOpacity
+            style={[styles.primaryButton, { backgroundColor: theme.primary }]}
+            onPress={() => void loadFirstPage()}
+            accessibilityRole="button"
+            accessibilityLabel="Tentar novamente"
+          >
             <Text style={styles.primaryButtonText}>Tentar novamente</Text>
           </TouchableOpacity>
         </View>
@@ -149,34 +156,62 @@ export default function ExploreScreen() {
 
   return (
     <AppShell title="Descobrir">
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: theme.bg }]}>
         <Text style={styles.heading}>Descobrir universos</Text>
         <Text style={styles.subtitle}>Universos públicos criados pela comunidade</Text>
 
         <View style={styles.sortRow}>
           <TouchableOpacity
-            style={[styles.sortChip, sort === 'recent' && styles.sortChipActive]}
+            style={[
+              styles.sortChip,
+              { borderColor: theme.primarySoft },
+              sort === 'recent' && {
+                backgroundColor: theme.primary,
+                borderColor: theme.primary,
+              },
+            ]}
             onPress={() => setSort('recent')}
             accessibilityRole="button"
             accessibilityLabel="Ordenar por mais recentes"
           >
-            <Text style={[styles.sortChipText, sort === 'recent' && styles.sortChipTextActive]}>
+            <Text
+              style={[
+                styles.sortChipText,
+                { color: sort === 'recent' ? '#ffffff' : theme.primary },
+              ]}
+            >
               Recentes
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.sortChip, sort === 'top' && styles.sortChipActive]}
+            style={[
+              styles.sortChip,
+              { borderColor: theme.primarySoft },
+              sort === 'top' && {
+                backgroundColor: theme.primary,
+                borderColor: theme.primary,
+              },
+            ]}
             onPress={() => setSort('top')}
             accessibilityRole="button"
             accessibilityLabel="Ordenar por melhor avaliados"
           >
-            <Text style={[styles.sortChipText, sort === 'top' && styles.sortChipTextActive]}>
+            <Text
+              style={[
+                styles.sortChipText,
+                { color: sort === 'top' ? '#ffffff' : theme.primary },
+              ]}
+            >
               Melhor avaliados
             </Text>
           </TouchableOpacity>
         </View>
 
-        {ratingMessage ? <Text style={styles.ratingMessage}>{ratingMessage}</Text> : null}
+        {ratingMessage ? (
+          <Text style={[styles.ratingMessage, { color: theme.primary }]}>
+            {ratingMessage}
+          </Text>
+        ) : null}
 
         {items.length === 0 ? (
           <View style={styles.centerFlex}>
@@ -193,12 +228,12 @@ export default function ExploreScreen() {
               <RefreshControl
                 refreshing={refreshing}
                 onRefresh={() => void handleRefresh()}
-                tintColor="#7C3AED"
+                tintColor={theme.primary}
               />
             }
             ListFooterComponent={
               loadingMore ? (
-                <ActivityIndicator size="small" color="#7C3AED" style={styles.footerLoader} />
+                <ActivityIndicator size="small" color={theme.primary} style={styles.footerLoader} />
               ) : null
             }
             renderItem={({ item }) => (
@@ -232,14 +267,12 @@ export default function ExploreScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAF5FF',
     paddingTop: 56,
   },
   center: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FAF5FF',
     padding: 24,
   },
   centerFlex: {
@@ -272,24 +305,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 20,
     borderWidth: 1.5,
-    borderColor: '#DDD6FE',
     backgroundColor: '#ffffff',
-  },
-  sortChipActive: {
-    backgroundColor: '#7C3AED',
-    borderColor: '#7C3AED',
   },
   sortChipText: {
     fontSize: 14,
-    color: '#7C3AED',
     fontWeight: '600',
-  },
-  sortChipTextActive: {
-    color: '#ffffff',
   },
   ratingMessage: {
     fontSize: 13,
-    color: '#7C3AED',
     paddingHorizontal: 20,
     paddingBottom: 8,
     fontWeight: '600',
@@ -303,7 +326,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderRadius: 16,
     padding: 20,
-    shadowColor: '#7C3AED',
+    shadowColor: '#1E1B4B',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
     shadowRadius: 8,
@@ -359,7 +382,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   primaryButton: {
-    backgroundColor: '#7C3AED',
     borderRadius: 10,
     paddingVertical: 12,
     paddingHorizontal: 24,
