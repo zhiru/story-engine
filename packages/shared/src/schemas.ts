@@ -273,3 +273,35 @@ export const CostSummarySchema = z.object({
   byProvider: z.array(CostSummaryProviderSchema),
 });
 export type CostSummary = z.infer<typeof CostSummarySchema>;
+
+// ===== Discovery & ratings (WP-B) =====
+
+// RF-31: 1..5 estrelas, uma avaliação por usuário por universo.
+export const RateUniverseInputSchema = z.object({
+  score: z.number().int().min(1).max(5),
+});
+export type RateUniverseInput = z.infer<typeof RateUniverseInputSchema>;
+
+// SDD §6.4: apenas o gerador altera a visibilidade da história.
+export const UpdateStoryVisibilityInputSchema = z.object({
+  visibility: z.enum(["PUBLIC", "PRIVATE", "PAID"]),
+});
+export type UpdateStoryVisibilityInput = z.infer<
+  typeof UpdateStoryVisibilityInputSchema
+>;
+
+// Item do feed de descoberta (RF-30) — snake_case como no envelope da API.
+export const DiscoveryItemSchema = z.object({
+  id: z.string().uuid(),
+  title: z.string(),
+  description: z.string(),
+  rating_score: z.number(),
+  created_at: z.string().datetime({ offset: true }),
+  owner_name: z.string(),
+});
+export type DiscoveryItem = z.infer<typeof DiscoveryItemSchema>;
+
+// Envelope de paginação por cursor (SDD §7): { items, next_cursor }.
+export const PaginatedSchema = <T extends z.ZodTypeAny>(item: T) =>
+  z.object({ items: z.array(item), next_cursor: z.string().nullable() });
+export type Paginated<T> = { items: T[]; next_cursor: string | null };
