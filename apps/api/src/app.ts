@@ -11,6 +11,7 @@ import { storyRoutes } from "./routes/stories.js";
 import { creativeRoutes } from "./routes/creative.js";
 import { generateRoutes } from "./routes/generate.js";
 import { meRoutes } from "./routes/me.js";
+import { billingRoutes } from "./routes/billing.js";
 import { userRoutes } from "./routes/users.js";
 import { adminUserRoutes } from "./routes/admin/users.js";
 import { adminPlanRoutes } from "./routes/admin/plans.js";
@@ -146,6 +147,7 @@ export function buildApp(opts?: { disableLogger?: boolean }) {
   }
 
   app.register(meRoutes, { prefix: "/api/v1" });
+  app.register(billingRoutes, { prefix: "/api/v1" });
   app.register(userRoutes, { prefix: "/api/v1" });
   app.register(adminUserRoutes, { prefix: "/api/v1" });
   app.register(adminPlanRoutes, { prefix: "/api/v1" });

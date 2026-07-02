@@ -22,4 +22,13 @@ export const env = {
   rateLimitGenerateWindowMs: Number(process.env.RATE_LIMIT_GENERATE_WINDOW_MS ?? 60000),
   // LGPD
   lgpdHashSalt: process.env.LGPD_HASH_SALT ?? "storygen-dev-salt",
+  // Billing (WP-A): token de serviço do webhook RevenueCat (RF-50).
+  // Getter para leitura lazy — sem o token o webhook responde 503.
+  get revenuecatWebhookToken(): string {
+    return process.env.REVENUECAT_WEBHOOK_TOKEN ?? "";
+  },
+  // Carência em dias aplicada em BILLING_ISSUE antes de rebaixar limites (RF-51).
+  get gracePeriodDays(): number {
+    return Number(process.env.GRACE_PERIOD_DAYS ?? 3);
+  },
 };
