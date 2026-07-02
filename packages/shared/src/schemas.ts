@@ -74,6 +74,10 @@ export const CreateUniverseInputSchema = z.object({
   title: z.string().min(1).max(255),
   description: z.string().min(1).max(2000),
   visibility: z.enum(["PUBLIC", "PRIVATE", "PAID"]).optional(),
+  // Contexto de localização do universo (RF-10)
+  location_context: z.string().max(500).optional(),
+  latitude: z.number().min(-90).max(90).optional(),
+  longitude: z.number().min(-180).max(180).optional(),
 });
 export type CreateUniverseInput = z.infer<typeof CreateUniverseInputSchema>;
 
@@ -362,3 +366,33 @@ export type DiscoveryItem = z.infer<typeof DiscoveryItemSchema>;
 export const PaginatedSchema = <T extends z.ZodTypeAny>(item: T) =>
   z.object({ items: z.array(item), next_cursor: z.string().nullable() });
 export type Paginated<T> = { items: T[]; next_cursor: string | null };
+
+// ===== Creative CRUD (WP-C) =====
+
+// PATCH /universes/:id — todos os campos opcionais (RF-10).
+// location_context/latitude/longitude aceitam null para limpar o valor.
+export const UpdateUniverseInputSchema = z.object({
+  title: z.string().min(1).max(255).optional(),
+  description: z.string().min(1).max(2000).optional(),
+  visibility: z.enum(["PUBLIC", "PRIVATE", "PAID"]).optional(),
+  location_context: z.string().max(500).nullable().optional(),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
+});
+export type UpdateUniverseInput = z.infer<typeof UpdateUniverseInputSchema>;
+
+// PATCH /universes/:id/arcs/:aid — apenas title/isActive são editáveis;
+// summary/version pertencem ao pipeline de geração (RF-13, lock otimista).
+export const UpdateStoryArcInputSchema = z.object({
+  title: z.string().min(1).max(255).optional(),
+  isActive: z.boolean().optional(),
+});
+export type UpdateStoryArcInput = z.infer<typeof UpdateStoryArcInputSchema>;
+
+// PATCH /child-profiles/:id — responsável (guardian) apenas.
+export const UpdateChildProfileInputSchema = z.object({
+  nickname: z.string().min(1).max(255).optional(),
+  age_band: z.enum(["0_3", "4_6", "7_9", "10_12"]).optional(),
+  preferences: z.record(z.unknown()).optional(),
+});
+export type UpdateChildProfileInput = z.infer<typeof UpdateChildProfileInputSchema>;

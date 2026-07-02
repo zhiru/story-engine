@@ -116,3 +116,135 @@ describe("GET /api/v1/child-profiles — requires consent too", () => {
     expect(res.statusCode).toBe(403);
   });
 });
+
+// ═════ Creative CRUD (WP-C): PATCH/DELETE /child-profiles/:id ═════════════════
+
+async function createProfile(accessToken: string, nickname = "Kid") {
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/child-profiles",
+    headers: { authorization: `Bearer ${accessToken}` },
+    payload: { nickname, age_band: "4_6" },
+  });
+  return res.json() as { id: string; nickname: string };
+}
+
+describe("PATCH /api/v1/child-profiles/:id — guardian isolation", () => {
+  it("guardian updates own profile (nickname, age_band, preferences)", async () => {
+    const { accessToken } = await registerAndGetTokens("g1@example.com");
+    await grantConsent(accessToken);
+    const profile = await createProfile(accessToken);
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/child-profiles/${profile.id}`,
+      headers: { authorization: `Bearer ${accessToken}` },
+      payload: {
+        nickname: "Novo Apelido",
+        age_band: "7_9",
+        preferences: { cor: "azul" },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      nickname: string;
+      ageBand: string;
+      preferences: Record<string, unknown>;
+    };
+    expect(body.nickname).toBe("Novo Apelido");
+    expect(body.ageBand).toBe("7_9");
+    expect(body.preferences).toEqual({ cor: "azul" });
+  });
+
+  it("returns 404 when profile belongs to another guardian", async () => {
+    const { accessToken: tokenA } = await registerAndGetTokens("g2@example.com");
+    const { accessToken: tokenB } = await registerAndGetTokens("g3@example.com");
+    await grantConsent(tokenA);
+    await grantConsent(tokenB);
+    const profileA = await createProfile(tokenA, "Filho de A");
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/child-profiles/${profileA.id}`,
+      headers: { authorization: `Bearer ${tokenB}` },
+      payload: { nickname: "Invasão" },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("returns 400 for invalid age_band", async () => {
+    const { accessToken } = await registerAndGetTokens("g4@example.com");
+    await grantConsent(accessToken);
+    const profile = await createProfile(accessToken);
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/child-profiles/${profile.id}`,
+      headers: { authorization: `Bearer ${accessToken}` },
+      payload: { age_band: "13_15" },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+describe("DELETE /api/v1/child-profiles/:id — guardian isolation + soft-delete", () => {
+  it("guardian soft-deletes own profile; profile disappears from GET", async () => {
+    const { accessToken } = await registerAndGetTokens("g5@example.com");
+    await grantConsent(accessToken);
+    const profile = await createProfile(accessToken);
+
+    const delRes = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/child-profiles/${profile.id}`,
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+    expect(delRes.statusCode).toBe(200);
+    expect(delRes.json()).toEqual({ ok: true });
+
+    // Invisível no detalhe e na lista
+    const getRes = await app.inject({
+      method: "GET",
+      url: `/api/v1/child-profiles/${profile.id}`,
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+    expect(getRes.statusCode).toBe(404);
+
+    const listRes = await app.inject({
+      method: "GET",
+      url: "/api/v1/child-profiles",
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+    expect(listRes.json() as unknown[]).toHaveLength(0);
+
+    // DELETE de novo → 404 (já soft-deletado)
+    const delAgain = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/child-profiles/${profile.id}`,
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+    expect(delAgain.statusCode).toBe(404);
+  });
+
+  it("returns 404 when deleting another guardian's profile", async () => {
+    const { accessToken: tokenA } = await registerAndGetTokens("g6@example.com");
+    const { accessToken: tokenB } = await registerAndGetTokens("g7@example.com");
+    await grantConsent(tokenA);
+    await grantConsent(tokenB);
+    const profileA = await createProfile(tokenA);
+
+    const res = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/child-profiles/${profileA.id}`,
+      headers: { authorization: `Bearer ${tokenB}` },
+    });
+    expect(res.statusCode).toBe(404);
+
+    // Perfil de A continua acessível para A
+    const stillThere = await app.inject({
+      method: "GET",
+      url: `/api/v1/child-profiles/${profileA.id}`,
+      headers: { authorization: `Bearer ${tokenA}` },
+    });
+    expect(stillThere.statusCode).toBe(200);
+  });
+});

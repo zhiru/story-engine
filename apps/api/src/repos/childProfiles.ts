@@ -49,3 +49,43 @@ export async function getOwnedChildProfile(actor: Actor, id: string) {
     .limit(1);
   return row ?? null;
 }
+
+/** Atualiza perfil infantil — apenas do próprio responsável (guardian). */
+export async function updateOwnedChildProfile(
+  actor: Actor,
+  id: string,
+  patch: Partial<{
+    nickname: string;
+    ageBand: "0_3" | "4_6" | "7_9" | "10_12";
+    preferences: Record<string, unknown>;
+  }>,
+) {
+  const [row] = await db
+    .update(childProfiles)
+    .set({ ...patch, updatedAt: new Date() })
+    .where(
+      and(
+        eq(childProfiles.id, id),
+        eq(childProfiles.guardianId, actor.id),
+        isNull(childProfiles.deletedAt),
+      ),
+    )
+    .returning();
+  return row ?? null;
+}
+
+/** Soft-delete de perfil infantil — apenas do próprio responsável. */
+export async function softDeleteOwnedChildProfile(actor: Actor, id: string) {
+  const [row] = await db
+    .update(childProfiles)
+    .set({ deletedAt: new Date(), updatedAt: new Date() })
+    .where(
+      and(
+        eq(childProfiles.id, id),
+        eq(childProfiles.guardianId, actor.id),
+        isNull(childProfiles.deletedAt),
+      ),
+    )
+    .returning();
+  return row ?? null;
+}

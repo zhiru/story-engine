@@ -1,6 +1,6 @@
 import { and, eq, isNull, or } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { universes } from "../db/schema.js";
+import { characters, storyArcs, themes, universes } from "../db/schema.js";
 
 type Actor = { id: string; role: "USER" | "MODERATOR" | "ADMIN" };
 
@@ -10,6 +10,9 @@ export async function createUniverse(
     title: string;
     description: string;
     visibility?: "PUBLIC" | "PRIVATE" | "PAID";
+    locationContext?: string | null;
+    latitude?: string | null; // numeric no Postgres → string no driver
+    longitude?: string | null;
   },
 ) {
   const [row] = await db
@@ -17,6 +20,53 @@ export async function createUniverse(
     .values({ userId: actor.id, ...input })
     .returning();
   return row;
+}
+
+/** Atualiza campos editáveis do universo (RF-10). */
+export async function updateUniverse(
+  id: string,
+  patch: Partial<{
+    title: string;
+    description: string;
+    visibility: "PUBLIC" | "PRIVATE" | "PAID";
+    locationContext: string | null;
+    latitude: string | null;
+    longitude: string | null;
+  }>,
+) {
+  const [row] = await db
+    .update(universes)
+    .set({ ...patch, updatedAt: new Date() })
+    .where(and(eq(universes.id, id), isNull(universes.deletedAt)))
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * Soft-delete do universo E de seus filhos (characters/themes/story_arcs)
+ * em uma única transação (SDD 6.1 — soft-delete universal). Stories
+ * permanecem (histórico do gerador); ficam ocultas junto com o universo.
+ */
+export async function softDeleteUniverseCascade(id: string) {
+  const now = new Date();
+  await db.transaction(async (tx) => {
+    await tx
+      .update(universes)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(and(eq(universes.id, id), isNull(universes.deletedAt)));
+    await tx
+      .update(characters)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(and(eq(characters.universeId, id), isNull(characters.deletedAt)));
+    await tx
+      .update(themes)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(and(eq(themes.universeId, id), isNull(themes.deletedAt)));
+    await tx
+      .update(storyArcs)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(and(eq(storyArcs.universeId, id), isNull(storyArcs.deletedAt)));
+  });
 }
 
 /** Busca universo não deletado por id. */
