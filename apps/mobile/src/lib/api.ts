@@ -28,6 +28,13 @@ import {
   type UpdateReportInput,
   type UpdateAppSettingsInput,
   type CostSummary,
+  type UpdateChildProfileInput,
+  type MeSubscriptionResponse,
+  type MeUsageResponse,
+  type CreateReportInput,
+  type CreateStoryArcInput,
+  type DiscoveryItem,
+  type Paginated,
 } from "@storygen/shared";
 
 // EXPO_PUBLIC_* são inlinados pelo Expo no bundle em build-time (garantido),
@@ -155,6 +162,41 @@ async function patch<T>(
   };
   const res = await fetch(`${apiUrl}/api/v1${path}`, {
     method: "PATCH",
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const payload = (await res.json()) as
+      | { error?: { code?: string; message?: string } | string }
+      | undefined;
+    if (payload && typeof payload.error === "object" && payload.error !== null) {
+      throw new ApiError(
+        payload.error.code ?? "UNKNOWN",
+        payload.error.message ?? `HTTP ${res.status}`,
+        res.status,
+      );
+    }
+    const msg =
+      payload && typeof payload.error === "string"
+        ? payload.error
+        : `HTTP ${res.status}`;
+    throw new ApiError("UNKNOWN", msg, res.status);
+  }
+  return res.json() as Promise<T>;
+}
+
+async function put<T>(
+  path: string,
+  body: unknown,
+  accessToken: string,
+): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-App-Slug": appSlug,
+    Authorization: `Bearer ${accessToken}`,
+  };
+  const res = await fetch(`${apiUrl}/api/v1${path}`, {
+    method: "PUT",
     headers,
     body: JSON.stringify(body),
   });
@@ -368,6 +410,7 @@ export async function addTheme(
 ): Promise<AddThemeResult> {
   return post<AddThemeResult>(`/universes/${universeId}/themes`, input, accessToken);
 }
+
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ── Admin back-office (RF-40..RF-46 + auditoria + LGPD) ─────────────────────
@@ -643,4 +686,151 @@ export async function eraseUser(
   accessToken: string,
 ): Promise<EraseUserResult> {
   return del<EraseUserResult>(`/users/${userId}`, accessToken, options);
+}
+
+
+// ── Universes (leitura por id) ───────────────────────────────────────────────
+
+export interface UniverseDetail {
+  id: string;
+  userId: string;
+  title: string;
+  description: string;
+  visibility: "PUBLIC" | "PRIVATE" | "PAID";
+  createdAt: string;
+}
+
+export async function getUniverse(
+  universeId: string,
+  accessToken: string,
+): Promise<UniverseDetail> {
+  return get<UniverseDetail>(`/universes/${universeId}`, accessToken);
+}
+
+// ── Child profiles (RF-03) ───────────────────────────────────────────────────
+// Resposta é a linha do banco (drizzle, camelCase); entrada usa snake_case
+// (ver apps/api/src/routes/childProfiles.ts).
+
+export interface ChildProfile {
+  id: string;
+  guardianId: string;
+  nickname: string;
+  ageBand: "0_3" | "4_6" | "7_9" | "10_12";
+  preferences: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateChildProfileInput {
+  nickname: string;
+  age_band: "0_3" | "4_6" | "7_9" | "10_12";
+  preferences?: Record<string, unknown>;
+}
+
+export async function listChildProfiles(
+  accessToken: string,
+): Promise<ChildProfile[]> {
+  return get<ChildProfile[]>("/child-profiles", accessToken);
+}
+
+export async function createChildProfile(
+  input: CreateChildProfileInput,
+  accessToken: string,
+): Promise<ChildProfile> {
+  return post<ChildProfile>("/child-profiles", input, accessToken);
+}
+
+export async function updateChildProfile(
+  id: string,
+  input: UpdateChildProfileInput,
+  accessToken: string,
+): Promise<ChildProfile> {
+  return patch<ChildProfile>(`/child-profiles/${id}`, input, accessToken);
+}
+
+export async function deleteChildProfile(
+  id: string,
+  accessToken: string,
+): Promise<void> {
+  await del<{ ok: true }>(`/child-profiles/${id}`, accessToken);
+}
+
+// ── Assinatura e uso (RF-52) ─────────────────────────────────────────────────
+
+export async function getMeSubscription(
+  accessToken: string,
+): Promise<MeSubscriptionResponse> {
+  return get<MeSubscriptionResponse>("/me/subscription", accessToken);
+}
+
+export async function getMeUsage(
+  accessToken: string,
+): Promise<MeUsageResponse> {
+  return get<MeUsageResponse>("/me/usage", accessToken);
+}
+
+// ── Denúncias (RF-44) ────────────────────────────────────────────────────────
+
+export async function createReport(
+  input: CreateReportInput,
+  accessToken: string,
+): Promise<void> {
+  await post<unknown>("/reports", input, accessToken);
+}
+
+// ── Arcos narrativos (RF-13/RF-25) ───────────────────────────────────────────
+
+export interface StoryArc {
+  id: string;
+  title: string;
+  summary: string | null;
+  version: number;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export async function listArcs(
+  universeId: string,
+  accessToken: string,
+): Promise<StoryArc[]> {
+  return get<StoryArc[]>(`/universes/${universeId}/arcs`, accessToken);
+}
+
+export async function createArc(
+  universeId: string,
+  input: CreateStoryArcInput,
+  accessToken: string,
+): Promise<StoryArc> {
+  return post<StoryArc>(`/universes/${universeId}/arcs`, input, accessToken);
+}
+
+// ── Descoberta e avaliações (RF-30/RF-31) ────────────────────────────────────
+
+export type DiscoverySort = "recent" | "top";
+
+export async function getDiscovery(
+  params: { sort?: DiscoverySort; cursor?: string; limit?: number },
+  accessToken: string,
+): Promise<Paginated<DiscoveryItem>> {
+  const search = new URLSearchParams();
+  if (params.sort) search.set("sort", params.sort);
+  if (params.cursor) search.set("cursor", params.cursor);
+  if (params.limit) search.set("limit", String(params.limit));
+  const qs = search.toString();
+  return get<Paginated<DiscoveryItem>>(
+    `/discovery${qs ? `?${qs}` : ""}`,
+    accessToken,
+  );
+}
+
+export async function rateUniverse(
+  universeId: string,
+  score: number,
+  accessToken: string,
+): Promise<{ rating_score: number }> {
+  return put<{ rating_score: number }>(
+    `/universes/${universeId}/rating`,
+    { score },
+    accessToken,
+  );
 }

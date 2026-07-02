@@ -1,180 +1,372 @@
-import { Image } from 'expo-image';
-import { SymbolView } from 'expo-symbols';
-import { Platform, Pressable, ScrollView, StyleSheet } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEffect, useState, useCallback } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { useRouter } from 'expo-router';
+import { useAuth } from '../auth/AuthContext';
+import { getDiscovery, rateUniverse, ApiError, type DiscoverySort } from '../lib/api';
+import type { DiscoveryItem } from '@storygen/shared';
+import AppShell from '../components/AppShell';
 
-import { ExternalLink } from '@/components/external-link';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Collapsible } from '@/components/ui/collapsible';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+const PAGE_SIZE = 20;
 
-export default function TabTwoScreen() {
-  const safeAreaInsets = useSafeAreaInsets();
-  const insets = {
-    ...safeAreaInsets,
-    bottom: safeAreaInsets.bottom + BottomTabInset + Spacing.three,
-  };
-  const theme = useTheme();
+function Stars({
+  score,
+  onRate,
+  disabled,
+}: {
+  score: number;
+  onRate: (value: number) => void;
+  disabled: boolean;
+}) {
+  return (
+    <View style={styles.starsRow}>
+      {[1, 2, 3, 4, 5].map((value) => (
+        <TouchableOpacity
+          key={value}
+          onPress={() => onRate(value)}
+          disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel={`Avaliar com ${value} ${value === 1 ? 'estrela' : 'estrelas'}`}
+          hitSlop={{ top: 6, bottom: 6, left: 2, right: 2 }}
+        >
+          <Text style={[styles.star, value <= Math.round(score) && styles.starFilled]}>
+            {value <= Math.round(score) ? '★' : '☆'}
+          </Text>
+        </TouchableOpacity>
+      ))}
+      <Text style={styles.starScore}>{score.toFixed(1)}</Text>
+    </View>
+  );
+}
 
-  const contentPlatformStyle = Platform.select({
-    android: {
-      paddingTop: insets.top,
-      paddingLeft: insets.left,
-      paddingRight: insets.right,
-      paddingBottom: insets.bottom,
-    },
-    web: {
-      paddingTop: Spacing.six,
-      paddingBottom: Spacing.four,
-    },
-  });
+export default function ExploreScreen() {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const router = useRouter() as any;
+  const { accessToken } = useAuth();
+
+  const [sort, setSort] = useState<DiscoverySort>('recent');
+  const [items, setItems] = useState<DiscoveryItem[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [ratingMessage, setRatingMessage] = useState<string | null>(null);
+  const [ratingBusy, setRatingBusy] = useState(false);
+
+  const loadFirstPage = useCallback(async () => {
+    if (!accessToken) return;
+    try {
+      setError(null);
+      const page = await getDiscovery({ sort, limit: PAGE_SIZE }, accessToken);
+      setItems(page.items);
+      setNextCursor(page.next_cursor);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Erro ao carregar universos.');
+    }
+  }, [accessToken, sort]);
+
+  useEffect(() => {
+    setLoading(true);
+    void loadFirstPage().finally(() => setLoading(false));
+  }, [loadFirstPage]);
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    await loadFirstPage();
+    setRefreshing(false);
+  }
+
+  async function handleLoadMore() {
+    if (!accessToken || !nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await getDiscovery(
+        { sort, cursor: nextCursor, limit: PAGE_SIZE },
+        accessToken,
+      );
+      setItems((prev) => [...prev, ...page.items]);
+      setNextCursor(page.next_cursor);
+    } catch {
+      // falha ao paginar não derruba o feed já carregado
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  async function handleRate(universeId: string, score: number) {
+    if (!accessToken || ratingBusy) return;
+    setRatingBusy(true);
+    setRatingMessage(null);
+    try {
+      const res = await rateUniverse(universeId, score, accessToken);
+      setItems((prev) =>
+        prev.map((item) =>
+          item.id === universeId ? { ...item, rating_score: res.rating_score } : item,
+        ),
+      );
+      setRatingMessage('Avaliação registrada. Obrigado!');
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 403) {
+        setRatingMessage('Você não pode avaliar seu próprio universo.');
+      } else {
+        setRatingMessage('Erro ao enviar avaliação. Tente novamente.');
+      }
+    } finally {
+      setRatingBusy(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <AppShell title="Descobrir">
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color="#7C3AED" />
+        </View>
+      </AppShell>
+    );
+  }
+
+  if (error) {
+    return (
+      <AppShell title="Descobrir">
+        <View style={styles.center}>
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity style={styles.primaryButton} onPress={() => void loadFirstPage()}>
+            <Text style={styles.primaryButtonText}>Tentar novamente</Text>
+          </TouchableOpacity>
+        </View>
+      </AppShell>
+    );
+  }
 
   return (
-    <ScrollView
-      style={[styles.scrollView, { backgroundColor: theme.background }]}
-      contentInset={insets}
-      contentContainerStyle={[styles.contentContainer, contentPlatformStyle]}>
-      <ThemedView style={styles.container}>
-        <ThemedView style={styles.titleContainer}>
-          <ThemedText type="subtitle">Explore</ThemedText>
-          <ThemedText style={styles.centerText} themeColor="textSecondary">
-            This starter app includes example{'\n'}code to help you get started.
-          </ThemedText>
+    <AppShell title="Descobrir">
+      <View style={styles.container}>
+        <Text style={styles.heading}>Descobrir universos</Text>
+        <Text style={styles.subtitle}>Universos públicos criados pela comunidade</Text>
 
-          <ExternalLink href="https://docs.expo.dev" asChild>
-            <Pressable style={({ pressed }) => pressed && styles.pressed}>
-              <ThemedView type="backgroundElement" style={styles.linkButton}>
-                <ThemedText type="link">Expo documentation</ThemedText>
-                <SymbolView
-                  tintColor={theme.text}
-                  name={{ ios: 'arrow.up.right.square', android: 'link', web: 'link' }}
-                  size={12}
-                />
-              </ThemedView>
-            </Pressable>
-          </ExternalLink>
-        </ThemedView>
+        <View style={styles.sortRow}>
+          <TouchableOpacity
+            style={[styles.sortChip, sort === 'recent' && styles.sortChipActive]}
+            onPress={() => setSort('recent')}
+            accessibilityRole="button"
+            accessibilityLabel="Ordenar por mais recentes"
+          >
+            <Text style={[styles.sortChipText, sort === 'recent' && styles.sortChipTextActive]}>
+              Recentes
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.sortChip, sort === 'top' && styles.sortChipActive]}
+            onPress={() => setSort('top')}
+            accessibilityRole="button"
+            accessibilityLabel="Ordenar por melhor avaliados"
+          >
+            <Text style={[styles.sortChipText, sort === 'top' && styles.sortChipTextActive]}>
+              Melhor avaliados
+            </Text>
+          </TouchableOpacity>
+        </View>
 
-        <ThemedView style={styles.sectionsWrapper}>
-          <Collapsible title="File-based routing">
-            <ThemedText type="small">
-              This app has two screens: <ThemedText type="code">src/app/index.tsx</ThemedText> and{' '}
-              <ThemedText type="code">src/app/explore.tsx</ThemedText>
-            </ThemedText>
-            <ThemedText type="small">
-              The layout file in <ThemedText type="code">src/app/_layout.tsx</ThemedText> sets up
-              the tab navigator.
-            </ThemedText>
-            <ExternalLink href="https://docs.expo.dev/router/introduction">
-              <ThemedText type="linkPrimary">Learn more</ThemedText>
-            </ExternalLink>
-          </Collapsible>
+        {ratingMessage ? <Text style={styles.ratingMessage}>{ratingMessage}</Text> : null}
 
-          <Collapsible title="Android, iOS, and web support">
-            <ThemedView type="backgroundElement" style={styles.collapsibleContent}>
-              <ThemedText type="small">
-                You can open this project on Android, iOS, and the web. To open the web version,
-                press <ThemedText type="smallBold">w</ThemedText> in the terminal running this
-                project.
-              </ThemedText>
-              <Image
-                source={require('@/assets/images/tutorial-web.png')}
-                style={styles.imageTutorial}
+        {items.length === 0 ? (
+          <View style={styles.centerFlex}>
+            <Text style={styles.emptyText}>Nenhum universo público por aqui ainda.</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={items}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.list}
+            onEndReached={() => void handleLoadMore()}
+            onEndReachedThreshold={0.4}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={() => void handleRefresh()}
+                tintColor="#7C3AED"
               />
-            </ThemedView>
-          </Collapsible>
-
-          <Collapsible title="Images">
-            <ThemedText type="small">
-              For static images, you can use the <ThemedText type="code">@2x</ThemedText> and{' '}
-              <ThemedText type="code">@3x</ThemedText> suffixes to provide files for different
-              screen densities.
-            </ThemedText>
-            <Image source={require('@/assets/images/react-logo.png')} style={styles.imageReact} />
-            <ExternalLink href="https://reactnative.dev/docs/images">
-              <ThemedText type="linkPrimary">Learn more</ThemedText>
-            </ExternalLink>
-          </Collapsible>
-
-          <Collapsible title="Light and dark mode components">
-            <ThemedText type="small">
-              This template has light and dark mode support. The{' '}
-              <ThemedText type="code">useColorScheme()</ThemedText> hook lets you inspect what the
-              user&apos;s current color scheme is, and so you can adjust UI colors accordingly.
-            </ThemedText>
-            <ExternalLink href="https://docs.expo.dev/develop/user-interface/color-themes/">
-              <ThemedText type="linkPrimary">Learn more</ThemedText>
-            </ExternalLink>
-          </Collapsible>
-
-          <Collapsible title="Animations">
-            <ThemedText type="small">
-              This template includes an example of an animated component. The{' '}
-              <ThemedText type="code">src/components/ui/collapsible.tsx</ThemedText> component uses
-              the powerful <ThemedText type="code">react-native-reanimated</ThemedText> library to
-              animate opening this hint.
-            </ThemedText>
-          </Collapsible>
-        </ThemedView>
-        {Platform.OS === 'web' && <WebBadge />}
-      </ThemedView>
-    </ScrollView>
+            }
+            ListFooterComponent={
+              loadingMore ? (
+                <ActivityIndicator size="small" color="#7C3AED" style={styles.footerLoader} />
+              ) : null
+            }
+            renderItem={({ item }) => (
+              <View style={styles.card}>
+                <TouchableOpacity
+                  onPress={() => router.push(`/universe/${item.id}`)}
+                  accessible
+                  accessibilityRole="button"
+                  accessibilityLabel={`Abrir universo: ${item.title}`}
+                >
+                  <Text style={styles.cardTitle}>{item.title}</Text>
+                  <Text style={styles.cardDescription} numberOfLines={2}>
+                    {item.description}
+                  </Text>
+                  <Text style={styles.cardOwner}>por {item.owner_name}</Text>
+                </TouchableOpacity>
+                <Stars
+                  score={item.rating_score}
+                  disabled={ratingBusy}
+                  onRate={(value) => void handleRate(item.id, value)}
+                />
+              </View>
+            )}
+          />
+        )}
+      </View>
+    </AppShell>
   );
 }
 
 const styles = StyleSheet.create({
-  scrollView: {
-    flex: 1,
-  },
-  contentContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-  },
   container: {
-    maxWidth: MaxContentWidth,
-    flexGrow: 1,
+    flex: 1,
+    backgroundColor: '#FAF5FF',
+    paddingTop: 56,
   },
-  titleContainer: {
-    gap: Spacing.three,
+  center: {
+    flex: 1,
     alignItems: 'center',
-    paddingHorizontal: Spacing.four,
-    paddingVertical: Spacing.six,
+    justifyContent: 'center',
+    backgroundColor: '#FAF5FF',
+    padding: 24,
   },
-  centerText: {
+  centerFlex: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  heading: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#1E1B4B',
+    paddingHorizontal: 20,
+    paddingBottom: 4,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: '#6B7280',
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+  },
+  sortRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+  },
+  sortChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: '#DDD6FE',
+    backgroundColor: '#ffffff',
+  },
+  sortChipActive: {
+    backgroundColor: '#7C3AED',
+    borderColor: '#7C3AED',
+  },
+  sortChipText: {
+    fontSize: 14,
+    color: '#7C3AED',
+    fontWeight: '600',
+  },
+  sortChipTextActive: {
+    color: '#ffffff',
+  },
+  ratingMessage: {
+    fontSize: 13,
+    color: '#7C3AED',
+    paddingHorizontal: 20,
+    paddingBottom: 8,
+    fontWeight: '600',
+  },
+  list: {
+    paddingHorizontal: 16,
+    paddingBottom: 32,
+    gap: 12,
+  },
+  card: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: '#7C3AED',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1E1B4B',
+    marginBottom: 6,
+  },
+  cardDescription: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginBottom: 8,
+    lineHeight: 20,
+  },
+  cardOwner: {
+    fontSize: 13,
+    color: '#9CA3AF',
+    marginBottom: 8,
+  },
+  starsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  star: {
+    fontSize: 22,
+    color: '#D1D5DB',
+  },
+  starFilled: {
+    color: '#F59E0B',
+  },
+  starScore: {
+    fontSize: 13,
+    color: '#6B7280',
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  footerLoader: {
+    paddingVertical: 16,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#6B7280',
     textAlign: 'center',
   },
-  pressed: {
-    opacity: 0.7,
+  errorText: {
+    fontSize: 16,
+    color: '#DC2626',
+    textAlign: 'center',
+    marginBottom: 16,
   },
-  linkButton: {
-    flexDirection: 'row',
-    paddingHorizontal: Spacing.four,
-    paddingVertical: Spacing.two,
-    borderRadius: Spacing.five,
-    justifyContent: 'center',
-    gap: Spacing.one,
-    alignItems: 'center',
+  primaryButton: {
+    backgroundColor: '#7C3AED',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
   },
-  sectionsWrapper: {
-    gap: Spacing.five,
-    paddingHorizontal: Spacing.four,
-    paddingTop: Spacing.three,
-  },
-  collapsibleContent: {
-    alignItems: 'center',
-  },
-  imageTutorial: {
-    width: '100%',
-    aspectRatio: 296 / 171,
-    borderRadius: Spacing.three,
-    marginTop: Spacing.two,
-  },
-  imageReact: {
-    width: 100,
-    height: 100,
-    alignSelf: 'center',
+  primaryButtonText: {
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 15,
   },
 });

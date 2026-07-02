@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { useRouter, usePathname } from 'expo-router';
 import { useAuth } from '../auth/AuthContext';
+import { getConfig } from '../lib/api';
 
 const SIDEBAR_WIDTH = 230;
 const BREAKPOINT = 760;
@@ -22,11 +23,6 @@ type NavGroup = {
   label: string;
   items: NavItem[];
 };
-
-const MAIN_LINKS: NavItem[] = [
-  { label: '📖 Histórias', route: '/' },
-  { label: '✨ Gerar história', route: '/generate' },
-];
 
 /**
  * Menu de administração agrupado (RF-40..RF-46). MODERATOR vê apenas
@@ -81,6 +77,42 @@ function buildAdminGroups(role: string | null): NavGroup[] {
   return groups;
 }
 
+// Cache de módulo: o modo do app (SINGLE/MULTI) muda raramente — evita
+// refazer GET /config a cada troca de tela.
+let cachedAppMode: 'SINGLE' | 'MULTI' | null = null;
+
+function useAppMode(): 'SINGLE' | 'MULTI' | null {
+  const { accessToken } = useAuth();
+  const [mode, setMode] = useState<'SINGLE' | 'MULTI' | null>(cachedAppMode);
+
+  useEffect(() => {
+    if (!accessToken || cachedAppMode) return;
+    getConfig(accessToken)
+      .then((config) => {
+        cachedAppMode = config.appMode;
+        setMode(config.appMode);
+      })
+      .catch(() => {
+        // sem config, links extras ficam ocultos — tolerável
+      });
+  }, [accessToken]);
+
+  return mode;
+}
+
+function useMainLinks(): NavItem[] {
+  const appMode = useAppMode();
+
+  return [
+    { label: '📖 Histórias', route: '/' },
+    { label: '✨ Gerar história', route: '/generate' },
+    // Descoberta de universos públicos só faz sentido no modo MULTI (RF-30)
+    ...(appMode === 'MULTI' ? [{ label: '🔭 Descobrir', route: '/explore' }] : []),
+    { label: '👶 Perfis infantis', route: '/child-profiles' },
+    { label: '⭐ Assinatura', route: '/subscription' },
+  ];
+}
+
 function SidebarContent({
   onNav,
 }: {
@@ -91,6 +123,7 @@ function SidebarContent({
   const { signOut, role } = useAuth();
 
   const adminGroups = buildAdminGroups(role);
+  const mainLinks = useMainLinks();
 
   function handleNav(route: string) {
     router.push(route);
@@ -110,7 +143,7 @@ function SidebarContent({
 
       <ScrollView style={styles.navScroll} showsVerticalScrollIndicator={false}>
         <View style={styles.navSection}>
-          {MAIN_LINKS.map((item) => (
+          {mainLinks.map((item) => (
             <TouchableOpacity
               key={item.route}
               style={[styles.navItem, isActive(item.route) && styles.navItemActive]}
@@ -217,16 +250,19 @@ function NarrowNav() {
   const { signOut, role } = useAuth();
 
   const adminLinks = buildAdminGroups(role).flatMap((group) => group.items);
+  const mainLinks = useMainLinks();
 
   function isActive(route: string) {
     if (route === '/') return pathname === '/' || pathname === '';
     return pathname.startsWith(route);
   }
 
+  const links = [...mainLinks, ...adminLinks];
+
   return (
     <View style={styles.narrowNav}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.narrowNavContent}>
-        {[...MAIN_LINKS, ...adminLinks].map((item) => (
+        {links.map((item) => (
           <TouchableOpacity
             key={item.route}
             style={[styles.narrowNavItem, isActive(item.route) && styles.narrowNavItemActive]}

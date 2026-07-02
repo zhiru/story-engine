@@ -16,6 +16,7 @@ type AuthState = {
   isLoading: boolean;
   role: UserRole | null;
   email: string | null;
+  userId: string | null;
 };
 
 type AuthContextType = AuthState & {
@@ -52,7 +53,7 @@ async function fetchAndApplyRole(
 ): Promise<void> {
   try {
     const me = await getMe(accessToken);
-    setState((s) => ({ ...s, role: me.role, email: me.email }));
+    setState((s) => ({ ...s, role: me.role, email: me.email, userId: me.id }));
   } catch {
     // tolerate failure — role stays null
   }
@@ -66,6 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isLoading: true,
     role: null,
     email: null,
+    userId: null,
   });
 
   // Load persisted tokens on mount
@@ -134,6 +136,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isLoading: false,
       role: null,
       email: null,
+      userId: null,
     });
   }, []);
 

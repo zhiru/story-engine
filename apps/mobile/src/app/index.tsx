@@ -10,15 +10,10 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../auth/AuthContext';
-import {
-  getConfig,
-  listStories,
-  listMyUniverses,
-  generateStory,
-  ApiError,
-} from '../lib/api';
+import { getConfig, listStories, listMyUniverses } from '../lib/api';
 import type { StoryListItem, UniverseListItem } from '@storygen/shared';
 import AppShell from '../components/AppShell';
+import UniverseStoriesView from '../components/UniverseStoriesView';
 
 // ── SINGLE mode view ──────────────────────────────────────────────────────────
 function SingleModeView({
@@ -97,166 +92,6 @@ function SingleModeView({
         {stories.length === 0 ? (
           <View style={styles.centerFlex}>
             <Text style={styles.emptyText}>Nenhuma historia disponivel ainda.</Text>
-          </View>
-        ) : (
-          <FlatList
-            data={stories}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={styles.list}
-            refreshControl={
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={() => void handleRefresh()}
-                tintColor="#7C3AED"
-              />
-            }
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={styles.card}
-                onPress={() => router.push(`/story/${item.id}`)}
-                accessible
-                accessibilityRole="button"
-                accessibilityLabel={`Ler historia: ${item.title}`}
-              >
-                <Text style={styles.cardTitle}>{item.title}</Text>
-                <Text style={styles.cardDate}>
-                  {new Date(item.createdAt).toLocaleDateString('pt-BR', {
-                    day: 'numeric',
-                    month: 'long',
-                    year: 'numeric',
-                  })}
-                </Text>
-              </TouchableOpacity>
-            )}
-          />
-        )}
-      </View>
-    </AppShell>
-  );
-}
-
-// ── MULTI mode: universe stories sub-view ─────────────────────────────────────
-function UniverseStoriesView({
-  universe,
-  accessToken,
-  onBack,
-}: {
-  universe: UniverseListItem;
-  accessToken: string;
-  onBack: () => void;
-}) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const router = useRouter() as any;
-  const [stories, setStories] = useState<StoryListItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [generating, setGenerating] = useState(false);
-  const [generateMessage, setGenerateMessage] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      setError(null);
-      const list = await listStories(universe.id, accessToken);
-      setStories(list);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Erro ao carregar histórias.');
-    }
-  }, [universe.id, accessToken]);
-
-  useEffect(() => {
-    setLoading(true);
-    void load().finally(() => setLoading(false));
-  }, [load]);
-
-  async function handleRefresh() {
-    setRefreshing(true);
-    await load();
-    setRefreshing(false);
-  }
-
-  async function handleGenerate() {
-    if (generating) return;
-    setGenerating(true);
-    setGenerateMessage(null);
-    try {
-      const result = await generateStory({ universe_id: universe.id }, accessToken);
-      await load();
-      router.push(`/story/${result.id}`);
-    } catch (e: unknown) {
-      if (e instanceof ApiError) {
-        if (e.status === 402) {
-          setGenerateMessage('Voce atingiu o limite de historias do seu plano este mes.');
-        } else if (e.status === 403) {
-          setGenerateMessage('Voce precisa de uma assinatura ativa para gerar historias.');
-        } else {
-          setGenerateMessage('Erro ao gerar historia. Tente novamente.');
-        }
-      } else {
-        setGenerateMessage('Erro ao gerar historia. Tente novamente.');
-      }
-    } finally {
-      setGenerating(false);
-    }
-  }
-
-  if (loading) {
-    return (
-      <AppShell title={universe.title}>
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color="#7C3AED" />
-        </View>
-      </AppShell>
-    );
-  }
-
-  if (error) {
-    return (
-      <AppShell title={universe.title}>
-        <View style={styles.center}>
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={() => void load()}>
-            <Text style={styles.retryText}>Tentar novamente</Text>
-          </TouchableOpacity>
-        </View>
-      </AppShell>
-    );
-  }
-
-  return (
-    <AppShell title={universe.title}>
-      <View style={styles.container}>
-        <TouchableOpacity style={styles.backRow} onPress={onBack}>
-          <Text style={styles.backLink}>← Universos</Text>
-        </TouchableOpacity>
-
-        <Text style={styles.heading}>{universe.title}</Text>
-
-        <TouchableOpacity
-          style={[styles.generateButton, generating && styles.generateButtonDisabled]}
-          onPress={() => void handleGenerate()}
-          disabled={generating}
-          accessible
-          accessibilityRole="button"
-          accessibilityLabel="Gerar nova historia"
-        >
-          {generating ? (
-            <View style={styles.generateButtonInner}>
-              <ActivityIndicator size="small" color="#ffffff" />
-              <Text style={styles.generateButtonText}>Gerando historia...</Text>
-            </View>
-          ) : (
-            <Text style={styles.generateButtonText}>Gerar nova historia</Text>
-          )}
-        </TouchableOpacity>
-
-        {generateMessage ? (
-          <Text style={styles.generateMessageText}>{generateMessage}</Text>
-        ) : null}
-
-        {stories.length === 0 ? (
-          <View style={styles.centerFlex}>
-            <Text style={styles.emptyText}>Nenhuma historia neste universo ainda.</Text>
           </View>
         ) : (
           <FlatList
@@ -514,15 +349,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 12,
   },
-  backRow: {
-    paddingHorizontal: 20,
-    paddingBottom: 8,
-  },
-  backLink: {
-    fontSize: 16,
-    color: '#7C3AED',
-    fontWeight: '600',
-  },
   generateButton: {
     backgroundColor: '#7C3AED',
     borderRadius: 12,
@@ -532,25 +358,10 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     alignItems: 'center',
   },
-  generateButtonDisabled: {
-    backgroundColor: '#A78BFA',
-  },
-  generateButtonInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
   generateButtonText: {
     color: '#ffffff',
     fontWeight: '700',
     fontSize: 16,
-  },
-  generateMessageText: {
-    color: '#DC2626',
-    fontSize: 14,
-    textAlign: 'center',
-    marginHorizontal: 16,
-    marginBottom: 8,
   },
   list: {
     paddingHorizontal: 16,
