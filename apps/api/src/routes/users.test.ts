@@ -14,6 +14,8 @@ import {
   users,
   universes,
   characters,
+  themes,
+  storyArcs,
   stories,
   auditLogs,
   usageRecords,
@@ -129,17 +131,29 @@ describe("DELETE /api/v1/users/:id (LGPD erasure)", () => {
     expect(storyRows).toHaveLength(1);
     const story = storyRows[0]!;
     expect(story.content).not.toContain("Gigi");
-    expect(story.content).toContain("[ANON]");
+    expect(story.content).toContain("[ANONIMIZADO_");
     expect(story.userGuidance).toBeNull();
     expect(story.promptUsed).toBe("");
+    // História em universo do próprio titular → soft-deletada (SDD 11.2 passo 1)
+    expect(story.deletedAt).not.toBeNull();
 
-    // Character name anonymized
+    // Character name anonymized with [ANONIMIZADO_<hash>] and soft-deleted
     const charRows = await db
       .select()
       .from(characters)
       .where(eq(characters.universeId, universe.id));
-    expect(charRows[0]?.name).toMatch(/^\[ANON_/);
+    expect(charRows[0]?.name).toMatch(/^\[ANONIMIZADO_[0-9A-F]{8}\]$/);
     expect(charRows[0]?.name).not.toContain("Gigi");
+    expect(charRows[0]?.deletedAt).not.toBeNull();
+    // O conteúdo da história usa o MESMO hash por personagem da linha do personagem
+    expect(story.content).toContain(charRows[0]!.name);
+
+    // Universo do titular soft-deletado
+    const [dbUniverse] = await db
+      .select()
+      .from(universes)
+      .where(eq(universes.id, universe.id));
+    expect(dbUniverse?.deletedAt).not.toBeNull();
 
     // Audit log written
     const logs = await db
@@ -199,7 +213,7 @@ describe("DELETE /api/v1/users/:id (LGPD erasure)", () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it("replaces all occurrences of a character name in story content", async () => {
+  it("replaces all occurrences of a character name in story content with the same tag", async () => {
     const user = await seedUser({ email: "multi@test.com", role: "USER" });
     const universe = await seedUniverse(user.id);
     await seedStory(universe.id, user.id, {
@@ -214,7 +228,143 @@ describe("DELETE /api/v1/users/:id (LGPD erasure)", () => {
     });
 
     const [story] = await db.select().from(stories).where(eq(stories.userId, user.id));
-    expect(story?.content).toBe("[ANON] is brave. [ANON] loves dragons. [ANON] wins!");
+    // Todas as ocorrências (case-insensitive) recebem a MESMA tag [ANONIMIZADO_<hash>]
+    expect(story?.content).toMatch(
+      /^\[ANONIMIZADO_([0-9A-F]{8})\] is brave\. \[ANONIMIZADO_\1\] loves dragons\. \[ANONIMIZADO_\1\] wins!$/,
+    );
+  });
+
+  it("soft-deletes own creative entities; non-owned stories stay anonymized only", async () => {
+    const owner = await seedUser({ email: "owner-b@test.com", role: "USER" });
+    const other = await seedUser({ email: "other-b@test.com", role: "USER" });
+
+    // Universo do titular com personagem, tema e arco
+    const ownUniverse = await seedUniverse(owner.id);
+    const ownChar = await seedCharacter(ownUniverse.id, "Zizi");
+    const [theme] = await db
+      .insert(themes)
+      .values({ universeId: ownUniverse.id, title: "Amizade" })
+      .returning();
+    const [arc] = await db
+      .insert(storyArcs)
+      .values({ universeId: ownUniverse.id, title: "Arco 1" })
+      .returning();
+    const ownStory = await seedStory(ownUniverse.id, owner.id, {
+      content: "Zizi voa alto.",
+      characterNames: ["Zizi"],
+    });
+
+    // História gerada pelo titular em universo de TERCEIRO
+    const otherUniverse = await seedUniverse(other.id);
+    const foreignStory = await seedStory(otherUniverse.id, owner.id, {
+      content: "Zeca corre no parque com Zeca.",
+      characterNames: ["Zeca"],
+    });
+
+    const res = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/users/${owner.id}`,
+      headers: bearer(owner.id, "USER"),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().anonymized).toMatchObject({
+      universes: 1,
+      themes: 1,
+      storyArcs: 1,
+      characters: 1,
+    });
+
+    // Entidades do titular soft-deletadas
+    const [dbUniverse] = await db.select().from(universes).where(eq(universes.id, ownUniverse.id));
+    expect(dbUniverse?.deletedAt).not.toBeNull();
+    const [dbChar] = await db.select().from(characters).where(eq(characters.id, ownChar.id));
+    expect(dbChar?.deletedAt).not.toBeNull();
+    const [dbTheme] = await db.select().from(themes).where(eq(themes.id, theme!.id));
+    expect(dbTheme?.deletedAt).not.toBeNull();
+    const [dbArc] = await db.select().from(storyArcs).where(eq(storyArcs.id, arc!.id));
+    expect(dbArc?.deletedAt).not.toBeNull();
+    const [dbOwnStory] = await db.select().from(stories).where(eq(stories.id, ownStory.id));
+    expect(dbOwnStory?.deletedAt).not.toBeNull();
+
+    // Universo do terceiro intacto; história lá gerada: anonimizada, NÃO soft-deletada
+    const [dbOtherUniverse] = await db
+      .select()
+      .from(universes)
+      .where(eq(universes.id, otherUniverse.id));
+    expect(dbOtherUniverse?.deletedAt).toBeNull();
+    const [dbForeignStory] = await db.select().from(stories).where(eq(stories.id, foreignStory.id));
+    expect(dbForeignStory?.deletedAt).toBeNull();
+    expect(dbForeignStory?.content).not.toContain("Zeca");
+    expect(dbForeignStory?.content).toContain("[ANONIMIZADO_");
+    expect(dbForeignStory?.promptUsed).toBe("");
+  });
+
+  it("delete_private_stories=true purges PRIVATE stories entirely", async () => {
+    const owner = await seedUser({ email: "priv@test.com", role: "USER" });
+    const other = await seedUser({ email: "priv-other@test.com", role: "USER" });
+    const otherUniverse = await seedUniverse(other.id);
+
+    // História PRIVATE do titular (default visibility=PRIVATE) em universo de terceiro
+    const privateStory = await seedStory(otherUniverse.id, owner.id, {
+      content: "Segredo da Gigi.",
+      characterNames: ["Gigi"],
+    });
+    // História PUBLIC do titular no mesmo universo
+    const [publicStory] = await db
+      .insert(stories)
+      .values({
+        universeId: otherUniverse.id,
+        userId: owner.id,
+        title: "Pública",
+        content: "Aventura da Gigi.",
+        characterNames: ["Gigi"],
+        promptUsed: "p",
+        visibility: "PUBLIC",
+      })
+      .returning();
+
+    const res = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/users/${owner.id}`,
+      headers: bearer(owner.id, "USER"),
+      payload: { delete_private_stories: true },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().anonymized.privateStoriesDeleted).toBe(1);
+
+    const [dbPrivate] = await db.select().from(stories).where(eq(stories.id, privateStory.id));
+    expect(dbPrivate?.content).toBe("[REMOVIDO A PEDIDO DO TITULAR]");
+    expect(dbPrivate?.deletedAt).not.toBeNull();
+
+    // A PUBLIC permanece: anonimizada, sem soft-delete
+    const [dbPublic] = await db.select().from(stories).where(eq(stories.id, publicStory!.id));
+    expect(dbPublic?.deletedAt).toBeNull();
+    expect(dbPublic?.content).not.toContain("Gigi");
+    expect(dbPublic?.content).toContain("[ANONIMIZADO_");
+  });
+
+  it("without delete_private_stories, PRIVATE stories are only anonymized", async () => {
+    const owner = await seedUser({ email: "priv-default@test.com", role: "USER" });
+    const other = await seedUser({ email: "priv-default-other@test.com", role: "USER" });
+    const otherUniverse = await seedUniverse(other.id);
+    const privateStory = await seedStory(otherUniverse.id, owner.id, {
+      content: "Segredo da Gigi.",
+      characterNames: ["Gigi"],
+    });
+
+    const res = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/users/${owner.id}`,
+      headers: bearer(owner.id, "USER"),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().anonymized.privateStoriesDeleted).toBe(0);
+
+    const [dbPrivate] = await db.select().from(stories).where(eq(stories.id, privateStory.id));
+    expect(dbPrivate?.deletedAt).toBeNull();
+    expect(dbPrivate?.content).not.toBe("[REMOVIDO A PEDIDO DO TITULAR]");
+    expect(dbPrivate?.content).not.toContain("Gigi");
+    expect(dbPrivate?.content).toContain("[ANONIMIZADO_");
   });
 
   it("response has x-request-id header", async () => {

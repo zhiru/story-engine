@@ -396,3 +396,15 @@ export const UpdateChildProfileInputSchema = z.object({
   preferences: z.record(z.unknown()).optional(),
 });
 export type UpdateChildProfileInput = z.infer<typeof UpdateChildProfileInputSchema>;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── WP-E: LGPD erasure options (DELETE /users/:id body) ─────────────────────
+// Novos schemas SEMPRE ao final do arquivo (merge-friendly).
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const EraseUserInputSchema = z.object({
+  // true → histórias PRIVATE do titular são excluídas integralmente
+  // (SDD 11.2 passo 3, última frase). Padrão: false (apenas anonimização).
+  delete_private_stories: z.boolean().optional().default(false),
+});
+export type EraseUserInput = z.infer<typeof EraseUserInputSchema>;

@@ -1,16 +1,17 @@
 # Produção (servidor Plesk): web preso em 127.0.0.1 (exposto só via proxy do Plesk),
 # API interna ao compose (sem porta no host). Postgres com volume próprio.
+# Credenciais via env do host com fallback dev (NUNCA commitar segredos reais).
 services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: storygen
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-storygen}
     volumes:
       - prod_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d storygen"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-storygen}"]
       interval: 3s
       timeout: 5s
       retries: 20
@@ -23,12 +24,42 @@ services:
     env_file:
       - apps/api/.env
     environment:
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/storygen
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-storygen}
       PORT: "3000"
       NODE_ENV: production
     depends_on:
       postgres:
         condition: service_healthy
+    restart: unless-stopped
+
+  # Backups diários (RNF-09): pg_dump -Fc a cada 24h em volume próprio,
+  # retenção de 30 dias. Restore: ver deploy/backup-restore.md.
+  backup:
+    image: postgres:17-alpine
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      PGDATABASE: ${POSTGRES_DB:-storygen}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+    volumes:
+      - prod_pgbackups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          ts=$$(date +%Y%m%d_%H%M%S)
+          if pg_dump -Fc -f "/backups/storygen_$${ts}.dump"; then
+            echo "[backup] ok: storygen_$${ts}.dump"
+          else
+            echo "[backup] FAILED at $${ts}" >&2
+          fi
+          find /backups -name 'storygen_*.dump' -mtime "+$${BACKUP_RETENTION_DAYS}" -delete
+          sleep 86400
+        done
     restart: unless-stopped
 
   web-single:
@@ -55,3 +86,4 @@ services:
 
 volumes:
   prod_pgdata:
+  prod_pgbackups:
