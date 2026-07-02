@@ -18,6 +18,69 @@ type NavItem = {
   route: string;
 };
 
+type NavGroup = {
+  label: string;
+  items: NavItem[];
+};
+
+const MAIN_LINKS: NavItem[] = [
+  { label: '📖 Histórias', route: '/' },
+  { label: '✨ Gerar história', route: '/generate' },
+];
+
+/**
+ * Menu de administração agrupado (RF-40..RF-46). MODERATOR vê apenas
+ * conteúdo e moderação (denúncias); ADMIN vê todos os grupos.
+ */
+function buildAdminGroups(role: string | null): NavGroup[] {
+  const isAdmin = role === 'ADMIN';
+  const isModerator = role === 'MODERATOR';
+  if (!isAdmin && !isModerator) return [];
+
+  const groups: NavGroup[] = [
+    {
+      label: 'Conteúdo',
+      items: [
+        { label: '🧒 Personagens', route: '/admin/characters' },
+        { label: '🎭 Temas', route: '/admin/themes' },
+      ],
+    },
+    {
+      label: 'Moderação',
+      items: [{ label: '🚩 Denúncias', route: '/admin/reports' }],
+    },
+  ];
+
+  if (isAdmin) {
+    groups.push(
+      {
+        label: 'Gestão',
+        items: [
+          { label: '👥 Usuários', route: '/admin/users' },
+          { label: '💳 Planos', route: '/admin/plans' },
+          { label: '⚙️ Configurações', route: '/admin/settings' },
+        ],
+      },
+      {
+        label: 'IA',
+        items: [
+          { label: '📝 Prompts', route: '/admin/prompts' },
+          { label: '🤖 Provedores de IA', route: '/admin/providers' },
+        ],
+      },
+      {
+        label: 'Governança',
+        items: [
+          { label: '📜 Auditoria', route: '/admin/audit' },
+          { label: '🛡️ LGPD', route: '/admin/lgpd' },
+        ],
+      },
+    );
+  }
+
+  return groups;
+}
+
 function SidebarContent({
   onNav,
 }: {
@@ -27,17 +90,7 @@ function SidebarContent({
   const pathname = usePathname();
   const { signOut, role } = useAuth();
 
-  const isAdmin = role === 'ADMIN' || role === 'MODERATOR';
-
-  const mainLinks: NavItem[] = [
-    { label: '📖 Histórias', route: '/' },
-    { label: '✨ Gerar história', route: '/generate' },
-  ];
-
-  const adminLinks: NavItem[] = [
-    { label: '🧒 Personagens', route: '/admin/characters' },
-    { label: '🎭 Temas', route: '/admin/themes' },
-  ];
+  const adminGroups = buildAdminGroups(role);
 
   function handleNav(route: string) {
     router.push(route);
@@ -57,7 +110,7 @@ function SidebarContent({
 
       <ScrollView style={styles.navScroll} showsVerticalScrollIndicator={false}>
         <View style={styles.navSection}>
-          {mainLinks.map((item) => (
+          {MAIN_LINKS.map((item) => (
             <TouchableOpacity
               key={item.route}
               style={[styles.navItem, isActive(item.route) && styles.navItemActive]}
@@ -77,26 +130,31 @@ function SidebarContent({
           ))}
         </View>
 
-        {isAdmin && (
+        {adminGroups.length > 0 && (
           <View style={styles.navSection}>
             <Text style={styles.sectionLabel}>Administração</Text>
-            {adminLinks.map((item) => (
-              <TouchableOpacity
-                key={item.route}
-                style={[styles.navItem, isActive(item.route) && styles.navItemActive]}
-                onPress={() => handleNav(item.route)}
-                accessibilityRole="button"
-                accessibilityLabel={item.label}
-              >
-                <Text
-                  style={[
-                    styles.navItemText,
-                    isActive(item.route) && styles.navItemTextActive,
-                  ]}
-                >
-                  {item.label}
-                </Text>
-              </TouchableOpacity>
+            {adminGroups.map((group) => (
+              <View key={group.label}>
+                <Text style={styles.groupLabel}>{group.label}</Text>
+                {group.items.map((item) => (
+                  <TouchableOpacity
+                    key={item.route}
+                    style={[styles.navItem, isActive(item.route) && styles.navItemActive]}
+                    onPress={() => handleNav(item.route)}
+                    accessibilityRole="button"
+                    accessibilityLabel={item.label}
+                  >
+                    <Text
+                      style={[
+                        styles.navItemText,
+                        isActive(item.route) && styles.navItemTextActive,
+                      ]}
+                    >
+                      {item.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             ))}
           </View>
         )}
@@ -158,7 +216,7 @@ function NarrowNav() {
   const pathname = usePathname();
   const { signOut, role } = useAuth();
 
-  const isAdmin = role === 'ADMIN' || role === 'MODERATOR';
+  const adminLinks = buildAdminGroups(role).flatMap((group) => group.items);
 
   function isActive(route: string) {
     if (route === '/') return pathname === '/' || pathname === '';
@@ -168,45 +226,24 @@ function NarrowNav() {
   return (
     <View style={styles.narrowNav}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.narrowNavContent}>
-        <TouchableOpacity
-          style={[styles.narrowNavItem, isActive('/') && styles.narrowNavItemActive]}
-          onPress={() => router.push('/')}
-        >
-          <Text style={[styles.narrowNavText, isActive('/') && styles.narrowNavTextActive]}>
-            📖 Histórias
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.narrowNavItem, isActive('/generate') && styles.narrowNavItemActive]}
-          onPress={() => router.push('/generate')}
-        >
-          <Text style={[styles.narrowNavText, isActive('/generate') && styles.narrowNavTextActive]}>
-            ✨ Gerar
-          </Text>
-        </TouchableOpacity>
-        {isAdmin && (
-          <>
-            <TouchableOpacity
-              style={[styles.narrowNavItem, isActive('/admin/characters') && styles.narrowNavItemActive]}
-              onPress={() => router.push('/admin/characters')}
-            >
-              <Text style={[styles.narrowNavText, isActive('/admin/characters') && styles.narrowNavTextActive]}>
-                🧒 Personagens
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.narrowNavItem, isActive('/admin/themes') && styles.narrowNavItemActive]}
-              onPress={() => router.push('/admin/themes')}
-            >
-              <Text style={[styles.narrowNavText, isActive('/admin/themes') && styles.narrowNavTextActive]}>
-                🎭 Temas
-              </Text>
-            </TouchableOpacity>
-          </>
-        )}
+        {[...MAIN_LINKS, ...adminLinks].map((item) => (
+          <TouchableOpacity
+            key={item.route}
+            style={[styles.narrowNavItem, isActive(item.route) && styles.narrowNavItemActive]}
+            onPress={() => router.push(item.route)}
+            accessibilityRole="button"
+            accessibilityLabel={item.label}
+          >
+            <Text style={[styles.narrowNavText, isActive(item.route) && styles.narrowNavTextActive]}>
+              {item.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
         <TouchableOpacity
           style={styles.narrowNavItem}
           onPress={() => void signOut()}
+          accessibilityRole="button"
+          accessibilityLabel="Sair"
         >
           <Text style={[styles.narrowNavText, { color: '#DC2626' }]}>Sair</Text>
         </TouchableOpacity>
@@ -261,6 +298,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 16,
     paddingBottom: 6,
+  },
+  groupLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#C4B5FD',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 2,
   },
   navItem: {
     paddingVertical: 11,
