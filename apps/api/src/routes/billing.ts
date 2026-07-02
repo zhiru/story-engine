@@ -86,6 +86,29 @@ async function auditBillingEvent(metadata: Record<string, unknown>) {
   });
 }
 
+/** Postgres unique_violation (SQLSTATE 23505) — usado como trava de idempotência. */
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code?: unknown }).code === "23505"
+  );
+}
+
+/**
+ * Auditoria tolerante à corrida: se um replay concorrente já gravou o mesmo
+ * event_id (viola uq_billing_event), trata como já processado em vez de 500.
+ * Usada nos caminhos "ignored" (que não mutam assinatura).
+ */
+async function auditBillingEventTolerant(metadata: Record<string, unknown>) {
+  try {
+    await auditBillingEvent(metadata);
+  } catch (err) {
+    if (!isUniqueViolation(err)) throw err;
+  }
+}
+
 /**
  * Resolve o plano pelo product_id (ou primeiro entitlement) contra
  * plans.revenuecat_entitlement. Desconhecido → null (mantém plano atual).
@@ -150,7 +173,7 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
       ? await getUserById(event.app_user_id)
       : null;
     if (!user) {
-      await auditBillingEvent({
+      await auditBillingEventTolerant({
         event_id: event.id,
         type: event.type,
         user_id: null,
@@ -164,7 +187,7 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     // 5) Tipo desconhecido → ignora com auditoria
     const type = event.type.toUpperCase();
     if (!KNOWN_TYPES.has(type)) {
-      await auditBillingEvent({
+      await auditBillingEventTolerant({
         event_id: event.id,
         type: event.type,
         user_id: user.id,
@@ -197,12 +220,20 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
         existing?.sub.currentPeriodEnd ??
         new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
     } else if (type === "BILLING_ISSUE") {
-      // RF-51: carência — estende o fim do período em GRACE_PERIOD_DAYS
+      // RF-51: carência — estende o fim do período em GRACE_PERIOD_DAYS.
       status = "PAST_DUE";
-      const base = expiration ?? existing?.sub.currentPeriodEnd ?? now;
-      periodEnd = new Date(
-        base.getTime() + env.gracePeriodDays * 24 * 60 * 60 * 1000,
-      );
+      if (!expiration && existing?.sub.status === "PAST_DUE") {
+        // Já em carência e o evento não traz expiration: NÃO re-estende. Sem
+        // isto, cada BILLING_ISSUE repetido (retries do RevenueCat) somaria
+        // outra carência sobre um current_period_end que já a inclui, empilhando
+        // acesso indefinidamente.
+        periodEnd = existing.sub.currentPeriodEnd;
+      } else {
+        const base = expiration ?? existing?.sub.currentPeriodEnd ?? now;
+        periodEnd = new Date(
+          base.getTime() + env.gracePeriodDays * 24 * 60 * 60 * 1000,
+        );
+      }
     } else if (type === "CANCELLATION") {
       // Mantém current_period_end — acesso até o fim do período pago
       status = "CANCELED";
@@ -216,34 +247,20 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     const store = mapStore(event.store);
     const externalId = event.original_app_user_id ?? event.id;
 
-    let subscriptionId: string;
-    if (existing) {
-      // Plano desconhecido → mantém o plano atual da assinatura
-      await db
-        .update(subscriptions)
-        .set({
-          planId: resolvedPlan?.id ?? existing.sub.planId,
-          status,
-          store,
-          externalId,
-          currentPeriodEnd: periodEnd,
-          updatedAt: now,
-        })
-        .where(eq(subscriptions.id, existing.sub.id));
-      subscriptionId = existing.sub.id;
-    } else {
-      // Sem assinatura anterior: plano resolvido ou o default seedado (TRIAL)
-      let planId = resolvedPlan?.id ?? null;
-      if (!planId) {
+    // Resolve o plano do INSERT (sem assinatura anterior) fora da transação.
+    let planIdForInsert: string | null = null;
+    if (!existing) {
+      planIdForInsert = resolvedPlan?.id ?? null;
+      if (!planIdForInsert) {
         const [trial] = await db
           .select({ id: plans.id })
           .from(plans)
           .where(and(eq(plans.id, TRIAL_PLAN_ID), isNull(plans.deletedAt)))
           .limit(1);
-        planId = trial?.id ?? null;
+        planIdForInsert = trial?.id ?? null;
       }
-      if (!planId) {
-        await auditBillingEvent({
+      if (!planIdForInsert) {
+        await auditBillingEventTolerant({
           event_id: event.id,
           type: event.type,
           user_id: user.id,
@@ -252,30 +269,69 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
         });
         return reply.code(200).send({ ignored: true });
       }
-      const [created] = await db
-        .insert(subscriptions)
-        .values({
-          userId: user.id,
-          planId,
-          status,
-          store,
-          externalId,
-          currentPeriodEnd: periodEnd,
-        })
-        .returning({ id: subscriptions.id });
-      subscriptionId = created!.id;
     }
 
-    // 7) Auditoria do evento processado (base da idempotência)
-    await auditBillingEvent({
-      event_id: event.id,
-      type: event.type,
-      user_id: user.id,
-      subscription_id: subscriptionId,
-      status,
-      plan_resolved: Boolean(resolvedPlan),
-      ...(resolvedPlan ? { plan_id: resolvedPlan.id } : {}),
-    });
+    // 6+7) Mutação da assinatura + auditoria do evento processado numa ÚNICA
+    // transação. O índice único parcial uq_billing_event (action='BILLING_EVENT'
+    // sobre metadata->>'event_id', migração 0003) torna a inserção da auditoria
+    // a trava atômica de idempotência: se um replay concorrente já venceu a
+    // corrida com o mesmo event_id, o INSERT viola a unique e a transação
+    // inteira — inclusive a mutação da assinatura — sofre rollback. Assim a
+    // assinatura é mutada uma única vez. O pré-check acima continua como fast
+    // path para o replay comum (não concorrente).
+    try {
+      await db.transaction(async (tx) => {
+        let subscriptionId: string;
+        if (existing) {
+          // Plano desconhecido → mantém o plano atual da assinatura
+          await tx
+            .update(subscriptions)
+            .set({
+              planId: resolvedPlan?.id ?? existing.sub.planId,
+              status,
+              store,
+              externalId,
+              currentPeriodEnd: periodEnd,
+              updatedAt: now,
+            })
+            .where(eq(subscriptions.id, existing.sub.id));
+          subscriptionId = existing.sub.id;
+        } else {
+          const [created] = await tx
+            .insert(subscriptions)
+            .values({
+              userId: user.id,
+              planId: planIdForInsert!,
+              status,
+              store,
+              externalId,
+              currentPeriodEnd: periodEnd,
+            })
+            .returning({ id: subscriptions.id });
+          subscriptionId = created!.id;
+        }
+
+        await tx.insert(auditLogs).values({
+          actorId: null,
+          action: "BILLING_EVENT",
+          metadata: {
+            event_id: event.id,
+            type: event.type,
+            user_id: user.id,
+            subscription_id: subscriptionId,
+            status,
+            plan_resolved: Boolean(resolvedPlan),
+            ...(resolvedPlan ? { plan_id: resolvedPlan.id } : {}),
+          },
+        });
+      });
+    } catch (err) {
+      // Replay concorrente venceu a corrida do event_id → nada mutado (rollback).
+      if (isUniqueViolation(err)) {
+        return reply.code(200).send({ duplicate: true });
+      }
+      throw err;
+    }
 
     return reply.code(200).send({ ok: true, status });
   });

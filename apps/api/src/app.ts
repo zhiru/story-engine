@@ -29,9 +29,24 @@ import { buildErrorHandler } from "./observability.js";
 import { errorEnvelope } from "./http/errors.js";
 
 /**
- * Chave do rate limit global: por usuário (SDD §7). O hook do rate limit roda
- * antes do requireAuth, então derivamos a chave do próprio Bearer token
- * (sha256) e caímos para o IP quando não há Authorization.
+ * Chave do rate limit GLOBAL: estritamente o IP do cliente.
+ *
+ * O hook do rate limit roda ANTES do requireAuth, portanto o Bearer é apenas
+ * um token não verificado nesse ponto. Chavear pelo token permitia a um
+ * atacante rotacionar tokens falsos e obter buckets ilimitados contra as rotas
+ * públicas (/auth/login|register|refresh) — brute force. O IP fecha esse vetor.
+ *
+ * Nota de deploy: atrás de proxy reverso, `request.ip` reflete X-Forwarded-For
+ * apenas se `trustProxy` estiver configurado no Fastify — confiar no header é
+ * decisão de infraestrutura (não habilitado aqui).
+ */
+export function globalRateLimitKey(request: FastifyRequest): string {
+  return request.ip;
+}
+
+/**
+ * Chave derivada do Bearer token (sha256), usada apenas como fallback do
+ * limiter de geração quando o actor ainda não foi resolvido.
  */
 function rateLimitKey(request: FastifyRequest): string {
   const auth = request.headers.authorization;
@@ -62,13 +77,14 @@ export function buildApp(opts?: { disableLogger?: boolean }) {
   // CORS: dev permite o app web (Expo :8081) chamar a API (:3000).
   app.register(cors, { origin: true });
 
-  // Rate limiting (global) — 60 req/min por usuário (SDD §7)
+  // Rate limiting (global) — 60 req/min por IP (SDD §7). Chaveado no IP para
+  // não permitir bypass via rotação de Bearer tokens falsos (pré-auth).
   if (!env.rateLimitDisabled) {
     app.register(rateLimit, {
       global: true,
       max: env.rateLimitGlobalMax,
       timeWindow: env.rateLimitGlobalWindowMs,
-      keyGenerator: rateLimitKey,
+      keyGenerator: globalRateLimitKey,
       errorResponseBuilder: (request, context) =>
         errorEnvelope(
           "RATE_LIMITED",

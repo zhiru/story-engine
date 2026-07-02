@@ -267,11 +267,13 @@ describe("GET /api/v1/stories/:id", () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it("returns APPROVED story to any authenticated user", async () => {
+  it("returns a PUBLIC+APPROVED story to any authenticated user", async () => {
     const owner = await seedUser({ email: "owner@x.com" });
     const reader = await seedUser({ email: "reader@x.com" });
     const universe = await seedUniverse(owner.id);
-    const story = await seedStory(universe.id, owner.id, "APPROVED");
+    const story = await seedStory(universe.id, owner.id, "APPROVED", {
+      visibility: "PUBLIC",
+    });
 
     const res = await app.inject({
       method: "GET",
@@ -283,6 +285,80 @@ describe("GET /api/v1/stories/:id", () => {
     const body = res.json();
     expect(body.id).toBe(story.id);
     expect(body.content).toBeTruthy();
+  });
+
+  // ── IDOR: história APPROVED mas PRIVATE não vaza para estranhos (SDD §6.4) ──
+
+  it("returns 404 to a stranger for an APPROVED but PRIVATE story (IDOR guard)", async () => {
+    const owner = await seedUser({ email: "owner@x.com" });
+    const stranger = await seedUser({ email: "stranger@x.com" });
+    // Universo PRIVATE do dono; história como toda história gerada: APPROVED+PRIVATE
+    const universe = await seedUniverse(owner.id, "PRIVATE");
+    const story = await seedStory(universe.id, owner.id, "APPROVED", {
+      visibility: "PRIVATE",
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/stories/${story.id}`,
+      headers: bearerHeader(stranger.id),
+    });
+
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("owner can read their own APPROVED+PRIVATE story", async () => {
+    const owner = await seedUser({ email: "owner@x.com" });
+    const universe = await seedUniverse(owner.id, "PRIVATE");
+    const story = await seedStory(universe.id, owner.id, "APPROVED", {
+      visibility: "PRIVATE",
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/stories/${story.id}`,
+      headers: bearerHeader(owner.id),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().id).toBe(story.id);
+  });
+
+  it("parent-universe owner (not the generator) can read an APPROVED+PRIVATE story", async () => {
+    const universeOwner = await seedUser({ email: "uniowner@x.com" });
+    const generator = await seedUser({ email: "generator@x.com" });
+    const universe = await seedUniverse(universeOwner.id, "PRIVATE");
+    // gerada por terceiro dentro do universo do dono
+    const story = await seedStory(universe.id, generator.id, "APPROVED", {
+      visibility: "PRIVATE",
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/stories/${story.id}`,
+      headers: bearerHeader(universeOwner.id),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().id).toBe(story.id);
+  });
+
+  it("ADMIN can read another user's APPROVED+PRIVATE story", async () => {
+    const owner = await seedUser({ email: "owner@x.com" });
+    const admin = await seedUser({ email: "admin@x.com", role: "ADMIN" });
+    const universe = await seedUniverse(owner.id, "PRIVATE");
+    const story = await seedStory(universe.id, owner.id, "APPROVED", {
+      visibility: "PRIVATE",
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/stories/${story.id}`,
+      headers: bearerHeader(admin.id, "ADMIN"),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().id).toBe(story.id);
   });
 
   it("includes user_id, visibility and metadata_weather", async () => {

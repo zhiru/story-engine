@@ -43,11 +43,27 @@ export async function getLatestSubscriptionWithPlan(userId: string) {
 }
 
 /**
- * Regra de acesso da assinatura (RF-51), espelhando a semântica de
- * services/generateStory.ts#getActiveSubscriptionPlan (ACTIVE exige
- * current_period_end no futuro) e estendendo para os estados com acesso
- * residual: PAST_DUE (dentro da carência já somada ao current_period_end)
- * e CANCELED (acesso até o fim do período pago).
+ * Estados de assinatura que concedem acesso (residual) enquanto
+ * current_period_end estiver no futuro (RF-51):
+ * - ACTIVE: assinatura vigente;
+ * - PAST_DUE: dentro da carência já somada ao current_period_end;
+ * - CANCELED: acesso até o fim do período pago.
+ * EXPIRED nunca concede acesso. Predicado compartilhado por
+ * isSubscriptionActive() (/me/subscription) e por
+ * services/generateStory.ts#getActiveSubscriptionPlan() (gate de geração),
+ * evitando a divergência em que /me mostra is_active=true mas a geração
+ * respondia 403 NO_ACTIVE_SUBSCRIPTION.
+ */
+export const RESIDUAL_ACCESS_STATUSES = [
+  "ACTIVE",
+  "PAST_DUE",
+  "CANCELED",
+] as const;
+
+/**
+ * Regra de acesso da assinatura (RF-51) — mesma semântica de
+ * RESIDUAL_ACCESS_STATUSES: qualquer estado exceto EXPIRED concede acesso
+ * enquanto current_period_end estiver no futuro.
  */
 export function isSubscriptionActive(sub: {
   status: "ACTIVE" | "PAST_DUE" | "CANCELED" | "EXPIRED";

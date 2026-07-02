@@ -340,6 +340,75 @@ describe("(c) /universes/mine — user isolation", () => {
   });
 });
 
+// ── SINGLE: USER lists themes/characters of the single-mode universe ──────────
+
+describe("(d) SINGLE mode — USER lists themes/characters of the single-mode universe", () => {
+  it("USER can list themes of the single-mode universe (not owner)", async () => {
+    const owner = await seedUser({ email: "single-owner@test.com", role: "ADMIN" });
+    const [universe] = await db
+      .insert(universes)
+      .values({
+        userId: owner.id,
+        title: "Universo do App",
+        description: "Universo único do app SINGLE",
+        visibility: "PRIVATE",
+      })
+      .returning();
+    await seedSingleAppSettings(universe!.id);
+    await db.insert(themes).values({
+      universeId: universe!.id,
+      title: "Amizade",
+      description: "Sobre amizade",
+    });
+
+    const user = await seedUser({ email: "single-reader@test.com", role: "USER" });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/universes/${universe!.id}/themes`,
+      headers: { ...bearerHeader(user.id, "USER"), "x-app-slug": SINGLE_SLUG },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const list = res.json() as Array<{ id: string; title: string }>;
+    expect(list).toHaveLength(1);
+    expect(list[0]!.title).toBe("Amizade");
+  });
+
+  it("USER can list characters of the single-mode universe (not owner)", async () => {
+    const owner = await seedUser({ email: "single-owner2@test.com", role: "ADMIN" });
+    const [universe] = await db
+      .insert(universes)
+      .values({
+        userId: owner.id,
+        title: "Universo do App",
+        description: "Universo único do app SINGLE",
+        visibility: "PRIVATE",
+      })
+      .returning();
+    await seedSingleAppSettings(universe!.id);
+    await db.insert(characters).values({
+      universeId: universe!.id,
+      name: "Herói",
+      classification: "PRINCIPAL",
+      traits: ["corajoso"],
+    });
+
+    const user = await seedUser({ email: "single-reader2@test.com", role: "USER" });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/universes/${universe!.id}/characters`,
+      headers: { ...bearerHeader(user.id, "USER"), "x-app-slug": SINGLE_SLUG },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const list = res.json() as Array<{ id: string; name: string }>;
+    expect(list).toHaveLength(1);
+    expect(list[0]!.name).toBe("Herói");
+  });
+});
+
 // ── MULTI: universe access check on generation ────────────────────────────────
 
 describe("MULTI mode — universe access check on generation", () => {
