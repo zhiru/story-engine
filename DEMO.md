@@ -6,13 +6,13 @@ App de histórias infantis geradas por IA (Claude via gateway OmniRoute). Dois m
 
 | Modo | URL | Login |
 |---|---|---|
-| **SINGLE** ("Histórias da Gigi") | http://localhost:8080 | `admin@storygen.dev` / `admin123` |
+| **SINGLE** ("Histórias da Gigi") | http://localhost:8081 | `admin@storygen.dev` / `admin123` |
 | **MULTI** ("Meu Universo") | http://localhost:8082 | **cadastre uma conta nova** |
 
-> Se `localhost` não abrir no navegador do Windows, use o IP do WSL: **http://192.168.2.2:8080** e **http://192.168.2.2:8082**. (A API é servida no **mesmo endereço** do site via proxy, então funciona pelos dois.)
+> Se `localhost` não abrir no navegador do Windows, use o IP do WSL: **http://192.168.2.2:8081** e **http://192.168.2.2:8082**. (A API é servida no **mesmo endereço** do site via proxy, então funciona pelos dois.)
 
 ### Fluxo SINGLE (universo fixo)
-1. Abre `:8080` → login com o admin acima.
+1. Abre `:8081` → login com o admin acima.
 2. Concede o consentimento (gate parental LGPD).
 3. Vê a história seedada "Gigi e o Bolo de Aniversário" → toca pra ler.
 4. **"Gerar nova historia"** → gera do Claude (~13s) e abre a leitura. Gera de novo = história diferente.
@@ -43,7 +43,7 @@ docker compose -f docker-compose.demo.yml down      # libera recursos (mantém o
 
 > **Recursos:** o stack **parado custa ~0%**. O peso é o `build-demo-web.sh` (Metro empacotando 2 bundles) — roda uma vez. Depois disso, `up -d` é leve.
 
-Portas: web SINGLE `8080`, web MULTI `8082`, API `3000`, Postgres (interno ao compose).
+Portas: web SINGLE `8081`, web MULTI `8082`, API `3000`, Postgres (interno ao compose).
 
 ## IA (Claude) e fallback
 A geração usa o gateway **OmniRoute → Claude**. Se o gateway estiver fora (ex.: `502`), o app cai automaticamente num **gerador offline (stub)** — a história sai mais simples, mas o app **não quebra**. Quando o gateway volta, as próximas histórias saem do Claude de novo. (Comportamento por design — adapter de provedor, ADR-04.)

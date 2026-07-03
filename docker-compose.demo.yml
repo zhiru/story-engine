@@ -37,7 +37,7 @@ services:
     depends_on:
       - api
     ports:
-      - "8080:80"
+      - "8081:80"
     restart: unless-stopped
   web-multi:
     image: nginx:alpine
