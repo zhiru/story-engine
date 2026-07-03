@@ -1,0 +1,27 @@
+{
+  "name": "storygen-engine",
+  "private": true,
+  "packageManager": "pnpm@10.22.0",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "typecheck": "pnpm -r --if-present run typecheck",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "test:shared": "pnpm --filter \"./packages/shared\" test",
+    "db:up": "docker compose up -d --wait postgres",
+    "db:down": "docker compose down",
+    "db:generate": "pnpm --filter \"./apps/api\" run db:generate",
+    "db:migrate": "pnpm --filter \"./apps/api\" run db:migrate",
+    "db:seed": "pnpm --filter \"./apps/api\" run db:seed",
+    "test:api": "pnpm --filter \"./apps/api\" test",
+    "ci:local": "pnpm typecheck && pnpm lint && pnpm test:shared && pnpm db:up && pnpm db:migrate && pnpm db:seed && pnpm test:api"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9",
+    "@types/node": "^22",
+    "eslint": "^9",
+    "prettier": "^3",
+    "typescript": "^5.6",
+    "typescript-eslint": "^8"
+  }
+}

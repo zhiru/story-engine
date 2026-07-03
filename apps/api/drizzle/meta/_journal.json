@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1781396143059,
+      "tag": "0000_ordinary_onslaught",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1781446472403,
+      "tag": "0001_peaceful_grey_gargoyle",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782000000000,
+      "tag": "0002_integrity_checks_indexes_triggers",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1782500000000,
+      "tag": "0003_billing_event_idempotency",
+      "breakpoints": true
+    }
+  ]
+}

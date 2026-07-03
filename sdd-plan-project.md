@@ -1,13 +1,14 @@
 # 📑 SDD (Specification-Driven Development) — StoryGen Engine
 
-**Versão:** 2.0.0
+**Versão:** 2.1.0
 **Produto:** Sistema White-Label Multi-Tenant / Single-Tenant de Histórias Infantis com IA
 
 ## Changelog
 
 | Versão | Data | Mudanças |
 |---|---|---|
-| 2.0.0 | 2026-06-09 | Reestruturação completa: requisitos numerados com prioridade, decisões de stack fechadas (ADRs), segurança de conteúdo infantil, consentimento parental LGPD, modelo de dados expandido (prompts, denúncias, notificações, avaliações, uso, audit log, perfis infantis), RLS, billing via IAP, API completa, NFRs, roadmap de fases. |
+| 2.1.0 | 2026-06-13 | **Pivô de arquitetura: removido Supabase.** Stack agora é PostgreSQL puro (Docker em dev/test) + API Fastify própria + Drizzle ORM + auth própria (argon2 + JWT). Autorização passa para a camada de aplicação (RLS deixa de ser o mecanismo primário). Edge Functions viram rotas/serviços da API. Storage → S3-compatível/MinIO. ADR-01/07 reescritos, ADR-08 (auth) adicionado. |
+| 2.0.0 | 2026-06-09 | Reestruturação completa: requisitos numerados com prioridade, decisões de stack fechadas (ADRs), segurança de conteúdo infantil, consentimento parental LGPD, modelo de dados expandido (prompts, denúncias, notificações, avaliações, uso, audit log, perfis infantis), billing via IAP, API completa, NFRs, roadmap de fases. |
 | 1.1.0 | — | Versão inicial (preservada em `sdd-plan-project-v1-backup.md`). |
 
 ---
@@ -63,25 +64,27 @@ Decisões fechadas. Alternativas rejeitadas registradas para contexto.
 
 | ID | Decisão | Justificativa | Rejeitado |
 |---|---|---|---|
-| ADR-01 | **Supabase** (PostgreSQL gerenciado + Auth + RLS + Edge Functions + Storage) | Postgres relacional é requisito do modelo de dados; RLS resolve multi-tenancy no banco; Auth e Storage integrados reduzem superfície. | Firebase (Firestore não é relacional; a v1.1 era contraditória nesse ponto). |
+| ADR-01 | **PostgreSQL puro** (Docker para dev/test local; instância gerenciada/VPS em produção) + **API Fastify própria** (`apps/api`, Node/TS) + **Drizzle ORM** (schema em TS, migrations geradas por drizzle-kit; tipos do banco inferidos do schema e compartilhados com o app) | Requisito do produto: **não usar Supabase** (nem outra BaaS). Postgres relacional atende o modelo de dados sem lock-in; Fastify é uma API TS leve que concentra auth, lógica de negócio, pipeline de IA, webhooks e LGPD; Drizzle dá SQL tipado + migrations versionadas. O app Expo nunca fala direto com o banco — sempre via a API. | Supabase / Firebase (BaaS, lock-in; vetado pelo usuário). |
 | ADR-02 | **React Native + Expo** (Expo Web/PWA para desktop) | Base única para 3 plataformas; EAS Build viabiliza white-label por perfil de build. | Flutter (time sem domínio), nativo duplo (custo). |
 | ADR-03 | **NativeWind** para estilização | Tailwind conhecido pelo time, theming por tokens compatível com remote config. | Tamagui (curva de adoção maior). |
 | ADR-04 | **Camada de abstração de provedor de IA** própria (adapter), provedores configuráveis em runtime via tabela `ai_providers` | Troca de modelo sem deploy; modelos evoluem mais rápido que o SDD — **nenhum nome de modelo é fixado em código ou neste documento**. | Acoplamento direto a um SDK. |
-| ADR-05 | **RevenueCat** como camada de billing (Apple IAP + Google Play Billing + Stripe Web) | Lojas **obrigam** IAP para bens digitais em apps mobile — Stripe direto no app viola política Apple/Google. RevenueCat unifica os 3 canais e webhooks de status. | Stripe-only (reprovação nas lojas). |
-| ADR-06 | **White-label híbrido**: identidade de build (ícone, nome, bundle id, `APP_MODE`) via perfis EAS Build; tema visual (cores, logo, feature flags) via remote config (tabela `app_settings`) | Mudar cor não pode exigir rebuild; mudar ícone exige. Separar os dois planos resolve a contradição da v1.1 (env vs. admin). | Tudo via `.env` (rebuild para tudo), tudo runtime (impossível para ícone/nome). |
-| ADR-07 | **Segredos em secret manager** (Supabase Vault / EAS Secrets), nunca em `.env` versionado nem neste documento | Chave de criptografia LGPD e API keys são material sensível. Rotação documentada em runbook. | Chaves em `.env` de exemplo (v1.1 expunha valor). |
+| ADR-05 | **RevenueCat** como camada de billing (Apple IAP + Google Play Billing + Stripe Web) | Lojas **obrigam** IAP para bens digitais em apps mobile — Stripe direto no app viola política Apple/Google. RevenueCat unifica os 3 canais e webhooks de status (recebidos por rota da API Fastify). | Stripe-only (reprovação nas lojas). |
+| ADR-06 | **White-label híbrido**: identidade de build (ícone, nome, bundle id, `APP_MODE`) via perfis EAS Build; tema visual (cores, logo, feature flags) via remote config (tabela `app_settings`, servida pela API) | Mudar cor não pode exigir rebuild; mudar ícone exige. Separar os dois planos resolve a contradição da v1.1 (env vs. admin). | Tudo via `.env` (rebuild para tudo), tudo runtime (impossível para ícone/nome). |
+| ADR-07 | **Segredos server-side** (`.env` da API fora do versionamento + secret manager do provedor de hospedagem; EAS Secrets para o build do app), nunca em `.env` versionado nem neste documento | `DATABASE_URL`, segredos de JWT, chave de criptografia LGPD e API keys são material sensível; vivem só no servidor. Rotação documentada em runbook. | Chaves de exemplo no repo (v1.1 expunha valor). |
+| ADR-08 | **Autenticação própria** na API: hash de senha com **argon2** + **JWT** access/refresh emitidos pela Fastify; RBAC por claim (`USER`/`MODERATOR`/`ADMIN`). **Autorização na camada de aplicação** (guards/policies da API), não RLS de Postgres. | Sem Supabase Auth, a API é o ponto único de auth; argon2 é o hash recomendado; JWT casa com clientes mobile/web. Multi-tenancy é garantido escopando toda query por usuário no serviço — RLS dependia de `auth.uid()` do Supabase e não se aplica. | Supabase Auth (vetado); RLS como mecanismo primário (sem o auth.uid() da plataforma). |
 
 ### 3.1 Topologia
 
 ```
 [App Expo (iOS/Android/Web)]
-        │ HTTPS (Supabase client + REST)
+        │ HTTPS / REST (cliente tipado, sem acesso direto ao banco)
         ▼
-[Supabase]
- ├─ Auth (JWT, contas de responsáveis)
- ├─ PostgreSQL + RLS (isolamento multi-tenant)
- ├─ Storage (imagens de personagens, logos white-label)
- └─ Edge Functions (TypeScript/Deno)
+[API Fastify (apps/api, Node/TS)]
+ ├─ Auth (argon2 + JWT access/refresh, RBAC por claim)
+ ├─ Autorização na camada de aplicação (queries escopadas por usuário)
+ ├─ Drizzle ORM ──► [PostgreSQL]  (Docker em dev/test; gerenciado em prod)
+ ├─ Object Storage (imagens de personagens, logos)  → S3-compatível / MinIO
+ └─ Serviços/rotas:
      ├─ story-generate  → orquestra pipeline de IA (Seção 8)
      ├─ billing-webhook → eventos RevenueCat
      ├─ moderation      → fila de revisão + denúncias
@@ -107,7 +110,7 @@ APP_SLUG=historias-da-gigi # identifica o tenant de configuração
 - Feature flags (ex.: `tts_enabled`, `discovery_feed_enabled`).
 - `single_mode_universe_id` (obrigatório quando `APP_MODE=SINGLE`).
 
-**Segredos (nunca no cliente):** chaves de LLM, OpenWeatherMap, RevenueCat e chave de criptografia LGPD vivem em Supabase Vault / secrets das Edge Functions.
+**Segredos (nunca no cliente):** `DATABASE_URL`, segredos de JWT, chaves de LLM, OpenWeatherMap, RevenueCat e chave de criptografia LGPD vivem só no servidor — `.env` da API (fora do versionamento) e secret manager do provedor de hospedagem.
 
 ---
 
@@ -231,9 +234,9 @@ notifications → users (destinatário)
 
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    auth_id UUID UNIQUE NOT NULL,            -- referência ao Supabase Auth
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,             -- argon2 (ADR-08); nunca a senha em claro
     role VARCHAR(20) NOT NULL DEFAULT 'USER'
         CHECK (role IN ('USER','MODERATOR','ADMIN')),
     suspended_until TIMESTAMPTZ DEFAULT NULL,
@@ -241,6 +244,17 @@ CREATE TABLE users (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at TIMESTAMPTZ DEFAULT NULL
 );
+
+-- Refresh tokens (rotação) — auth própria (ADR-08)
+CREATE TABLE refresh_tokens (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id),
+    token_hash TEXT NOT NULL,                -- hash do refresh token; nunca o token em claro
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ DEFAULT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_refresh_user ON refresh_tokens (user_id) WHERE revoked_at IS NULL;
 
 CREATE TABLE consent_records (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -335,7 +349,7 @@ CREATE TABLE characters (
         CHECK (classification IN ('PRINCIPAL','SECUNDARIO','ANTAGONISTA','MASCOTE')),
     age_group VARCHAR(50),
     traits TEXT[] NOT NULL DEFAULT '{}',
-    image_url VARCHAR(512) DEFAULT NULL,      -- Supabase Storage
+    image_url VARCHAR(512) DEFAULT NULL,      -- Object Storage (S3-compatível / MinIO)
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at TIMESTAMPTZ DEFAULT NULL
@@ -495,27 +509,27 @@ CREATE TABLE collaborations (
 );
 ```
 
-### 6.4 Row Level Security (obrigatório — ADR-01)
+### 6.4 Autorização (camada de aplicação — ADR-08)
 
-RLS **habilitado em todas as tabelas**. Políticas-base (pseudocódigo; implementação nas migrações):
+Sem Supabase, **não há RLS como mecanismo primário**. A API Fastify é o único caminho até o banco; toda autorização é aplicada no serviço (guards por rota + queries sempre escopadas pelo `user_id` do JWT). Regras-base que a API **deve** impor:
 
-| Tabela | SELECT | INSERT/UPDATE/DELETE |
+| Recurso | Leitura | Escrita |
 |---|---|---|
-| `universes` | dono, OU `visibility='PUBLIC'`, OU admin/moderador | dono (MULTI); só admin (SINGLE) |
-| `characters`/`themes`/`story_arcs` | herdam política do universo pai | idem |
-| `stories` | gerador, dono do universo, OU `visibility='PUBLIC' AND moderation_status='APPROVED'` | gerador (update de visibilidade); moderador (moderation_status) |
-| `child_profiles` | apenas `guardian_id = auth.uid()` | idem |
-| `subscriptions`/`usage_records` | apenas o próprio usuário; escrita só via service role (webhooks/edge) | — |
-| `prompt_templates`/`ai_providers`/`app_settings` | leitura: edge functions; escrita: admin | — |
-| `audit_logs`/`reports` | admin/moderador (reports: criador vê os seus) | INSERT por qualquer autenticado (reports) |
+| `universes` | dono, OU `visibility='PUBLIC'`, OU admin/moderador | dono (MULTI); só admin/moderador (SINGLE) |
+| `characters`/`themes`/`story_arcs` | herdam a regra do universo pai | idem |
+| `stories` | gerador, dono do universo, OU `visibility='PUBLIC' AND moderation_status='APPROVED'` | gerador (visibilidade); moderador (`moderation_status`) |
+| `child_profiles` | apenas onde `guardian_id = <jwt.user_id>` | idem |
+| `subscriptions`/`usage_records` | apenas o próprio usuário | **só serviços internos** (webhook de billing, pipeline de geração) — nunca por rota direta do cliente |
+| `prompt_templates`/`ai_providers`/`app_settings` | leitura: serviço interno (e `app_settings` público de tema); escrita: admin | admin |
+| `audit_logs`/`reports` | admin/moderador (em `reports`, o criador vê os seus) | criação de `reports` por qualquer autenticado |
 
-Escrita de quota (`usage_records`), billing e moderação ocorre exclusivamente via Edge Functions com service role — o cliente nunca escreve nessas tabelas.
+Escrita de quota (`usage_records`), billing e `moderation_status` ocorre exclusivamente em serviços internos da API — nunca exposta como rota de escrita do cliente. Testes de integração devem provar o isolamento (usuário A não acessa dados do usuário B via API). RLS pode ser adicionada como defesa em profundidade no futuro, mas não é requisito da Fase 1.
 
 ---
 
 ## 7. Interfaces de API
 
-Edge Functions expostas como REST sob `/api/v1`. Autenticação: JWT do Supabase Auth (`Authorization: Bearer`). Erros seguem envelope padrão:
+Rotas REST da API Fastify sob `/api/v1`. Autenticação: **JWT próprio** emitido pela API (`Authorization: Bearer <access_token>`; refresh em rota dedicada). Erros seguem envelope padrão:
 
 ```json
 { "error": { "code": "QUOTA_EXCEEDED", "message": "Limite mensal de histórias atingido.", "request_id": "..." } }
@@ -529,12 +543,12 @@ Paginação por cursor (`?cursor=&limit=`, máx. 50). Rate limit: 60 req/min por
 |---|---|---|---|
 | POST | `/auth/consent` | Registra consentimento parental (RF-02) | autenticado |
 | GET/POST/PATCH/DELETE | `/child-profiles[/:id]` | CRUD perfis infantis | responsável |
-| GET/POST/PATCH/DELETE | `/universes[/:id]` | CRUD universos (RLS aplica modo) | conforme modo |
+| GET/POST/PATCH/DELETE | `/universes[/:id]` | CRUD universos (modo aplicado pela API) | conforme modo |
 | GET/POST/PATCH/DELETE | `/universes/:id/characters[/:cid]` | CRUD personagens | dono/admin |
 | GET/POST/PATCH/DELETE | `/universes/:id/themes[/:tid]` | CRUD temas | dono/admin |
 | GET/POST/PATCH | `/universes/:id/arcs[/:aid]` | CRUD arcos | dono/admin |
 | **POST** | **`/stories/generate`** | Pipeline de geração (ver 7.2) | autenticado c/ quota |
-| GET | `/stories[/:id]` | Listagem/detalhe (filtros: universe, arc) | RLS |
+| GET | `/stories[/:id]` | Listagem/detalhe (filtros: universe, arc) | autorização da API |
 | PATCH | `/stories/:id` | Alterar visibilidade | gerador |
 | GET | `/discovery` | Feed público (RF-30) | autenticado |
 | PUT | `/universes/:id/rating` | Avaliar (RF-31) | autenticado |
@@ -559,7 +573,7 @@ Entrada:
 }
 ```
 
-Validações antes da geração: quota mensal (RF-14), assinatura ativa, sanitização de `user_guidance` (8.2), posse/acesso ao universo (RLS).
+Validações antes da geração: quota mensal (RF-14), assinatura ativa, sanitização de `user_guidance` (8.2), posse/acesso ao universo (autorização da API).
 
 Sucesso `201`:
 
@@ -605,7 +619,7 @@ Nomes/descrições de universos e personagens (criados pelo usuário em modo MUL
 
 ### 8.3 Contexto Espaço-Temporal e Extensibilidade
 
-- **Com geolocalização:** Edge Function consulta OpenWeatherMap (cache de 30 min por célula geográfica para conter custo) e injeta `{ temp, condition, time }`.
+- **Com geolocalização:** a API consulta OpenWeatherMap (cache de 30 min por célula geográfica para conter custo) e injeta `{ temp, condition, time }`.
 - **Sem geolocalização:** fallback determinístico por seed `(user_id + data)` sorteia condição plausível para a estação — evita histórias idênticas no mesmo dia sem depender de aleatoriedade pura.
 - **Extensão futura:** o montador de prompt resolve variáveis declaradas em `prompt_templates.variables` contra um registro de *context providers* (`weather`, `local_time`, `season`, `holiday`, futuramente `iot_sensor`). Adicionar fonte nova = registrar provider + declarar variável no template; sem reescrita do pipeline.
 
@@ -703,7 +717,7 @@ Novo cliente white-label = novo `APP_SLUG` + linha em `app_settings` + perfil EA
 - **Minimização:** perfis infantis guardam apelido + faixa etária, nada mais (RF-03).
 - **Consentimento parental** versionado e auditável (`consent_records`, RF-02).
 - **Soft-delete + retenção:** `deleted_at` universal; job mensal executa exclusão física após período de retenção legal (configurável, padrão 6 meses), registrando em `audit_logs`.
-- **Criptografia:** dados em repouso criptografados pelo Postgres gerenciado; campos extra-sensíveis (se surgirem) via `pgcrypto` com chave no Vault (ADR-07).
+- **Criptografia:** dados em repouso criptografados no nível do disco/instância Postgres; campos extra-sensíveis (se surgirem) via `pgcrypto` com chave no secret manager do servidor (ADR-07).
 
 ### 11.2 Fluxo de Exclusão/Anonimização (`DELETE /users/:id`)
 
@@ -720,8 +734,9 @@ Novo cliente white-label = novo `APP_SLUG` + linha em `app_settings` + perfil EA
 
 | Camada | Abordagem |
 |---|---|
-| Edge Functions | Testes unitários (Deno test) por função; pipeline de geração com provedor LLM mockado |
-| RLS | Suíte de testes SQL que valida cada política com usuários simulados (dono, estranho, admin, anônimo) — roda em CI a cada migração |
+| API Fastify | Testes de integração (Vitest) por rota/serviço contra um Postgres de teste (Docker); pipeline de geração com provedor LLM mockado |
+| Autorização | Testes de integração com 4 personas (dono, estranho, admin, anônimo) provam isolamento multi-tenant via API — rodam em CI a cada mudança |
+| Migrations | `drizzle-kit migrate` aplicado a um banco limpo + asserts de schema a cada CI |
 | Moderação | Corpus fixo de prompts adversariais (tentativas de injection e conteúdo inadequado) que DEVEM ser bloqueados — teste de regressão obrigatório a cada mudança de template/provedor |
 | App | Testes de componente (React Native Testing Library); E2E críticos (login → gerar → ler) via Maestro |
 | Billing | Webhooks RevenueCat em sandbox; máquina de estados de assinatura com testes de transição |
@@ -733,7 +748,7 @@ Novo cliente white-label = novo `APP_SLUG` + linha em `app_settings` + perfil EA
 ### Fase 1 — MVP modo SINGLE (núcleo de valor)
 Auth + consentimento parental · perfis infantis · universo fixo administrado · geração com contexto clima/horário · pipeline de moderação completo · arcos seriados · assinatura IAP/Stripe via RevenueCat · admin essencial (planos, usuários, prompts, moderação, LGPD) · observabilidade.
 
-**Critério de saída:** história gerada, moderada e lida de ponta a ponta nas 3 plataformas; quota e billing funcionando; suíte RLS e corpus de moderação verdes em CI.
+**Critério de saída:** história gerada, moderada e lida de ponta a ponta nas 3 plataformas; quota e billing funcionando; suíte de autorização (integração da API) e corpus de moderação verdes em CI.
 
 ### Fase 2 — Modo MULTI + enriquecimento
 Criação de universos por usuários finais · feed de descoberta + avaliações · geração de imagem de personagens · TTS · leitura offline · contas dependentes.

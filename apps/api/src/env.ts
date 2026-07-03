@@ -1,0 +1,36 @@
+function required(name: string): string {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing env var: ${name}`);
+  return v;
+}
+export const env = {
+  databaseUrl: required("DATABASE_URL"),
+  port: Number(process.env.PORT ?? 3000),
+  jwtAccessSecret: required("JWT_ACCESS_SECRET"),
+  jwtRefreshSecret: required("JWT_REFRESH_SECRET"),
+  // IA (opcional): gateway compatível com OpenAI. Sem chave, o provedor real
+  // falha e o pipeline cai no stub offline (ADR-04).
+  aiBaseUrl: process.env.AI_BASE_URL ?? "",
+  aiApiKey: process.env.AI_API_KEY ?? "",
+  aiModel: process.env.AI_MODEL ?? "",
+  // Clima real (RF-22): opcional; sem chave, contexto usa fallback determinístico.
+  openWeatherApiKey: process.env.OPENWEATHER_API_KEY ?? "",
+  // Rate limiting
+  rateLimitDisabled: process.env.RATE_LIMIT_DISABLED === "true",
+  // SDD §7: 60 req/min por usuário
+  rateLimitGlobalMax: Number(process.env.RATE_LIMIT_GLOBAL_MAX ?? 60),
+  rateLimitGlobalWindowMs: Number(process.env.RATE_LIMIT_GLOBAL_WINDOW_MS ?? 60000),
+  rateLimitGenerateMax: Number(process.env.RATE_LIMIT_GENERATE_MAX ?? 10),
+  rateLimitGenerateWindowMs: Number(process.env.RATE_LIMIT_GENERATE_WINDOW_MS ?? 60000),
+  // LGPD
+  lgpdHashSalt: process.env.LGPD_HASH_SALT ?? "storygen-dev-salt",
+  // Billing (WP-A): token de serviço do webhook RevenueCat (RF-50).
+  // Getter para leitura lazy — sem o token o webhook responde 503.
+  get revenuecatWebhookToken(): string {
+    return process.env.REVENUECAT_WEBHOOK_TOKEN ?? "";
+  },
+  // Carência em dias aplicada em BILLING_ISSUE antes de rebaixar limites (RF-51).
+  get gracePeriodDays(): number {
+    return Number(process.env.GRACE_PERIOD_DAYS ?? 3);
+  },
+};
